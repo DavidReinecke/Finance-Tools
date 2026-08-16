@@ -31,7 +31,7 @@
     align-items: flex-start;
     min-height: 100vh;
   }
-  .wrap { flex: 1 1 auto; min-width: 0; max-width: 960px; padding: 48px 40px; }
+  .wrap { flex: 0 1 960px; min-width: 0; margin: 0 auto; padding: 48px 40px; }
   h1 {
     font-size: 22px;
     font-weight: 650;
@@ -137,7 +137,7 @@
       border-radius: 6px;
     }
     .tab-btn.active { border-left-color: transparent; border-bottom-color: var(--focus); }
-    .wrap { padding: 24px 16px; max-width: 100%; }
+    .wrap { flex: 1 1 auto; margin: 0; padding: 24px 16px; max-width: 100%; }
   }
   .field-row {
     display: flex;
@@ -659,7 +659,7 @@
     <button class="tab-btn" data-tab="imgpdf" type="button">Image to PDF</button>
     <button class="tab-btn" data-tab="audit" type="button">OF-286 Audit</button>
     <button class="tab-btn" data-tab="sigprep" type="button">Invoice Signature</button>
-    <button class="tab-btn" data-tab="folders" type="button">Folder Namer</button>
+    <button class="tab-btn" data-tab="folders" type="button">Folder Generator</button>
   </div>
 </div>
 
@@ -991,7 +991,7 @@
   </div>
   </div>
 
-  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Contact david_reinecke@firenet.gov for questions, comments, or concerns<br>Version 6.4</p>
+  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Contact david_reinecke@firenet.gov for questions, comments, or concerns<br>Version 6.5</p>
 </div>
 
 <script src="./ocr/tesseract.min.js"></script>
@@ -3203,6 +3203,7 @@ async function applySignaturesToAllPages(fileBytes, {
     imgpdf: 'Image to PDF Converter',
     audit: 'OF-286 Audit',
     sigprep: 'Invoice Signature',
+    folders: 'Folder Generator',
   };
   const tabDescription = {
     clin: "Upload a Forest Service VIPR equipment rental agreement and a CLIN number. Get back a 3-page PDF (cover page, vendor info, and that CLIN's equipment record) with the key fields highlighted, plus copyable values for pasting elsewhere. Runs entirely in your browser — nothing is uploaded anywhere.",
@@ -3210,6 +3211,7 @@ async function applySignaturesToAllPages(fileBytes, {
     imgpdf: 'Drop in images (or a ZIP of images) and each one becomes its own PDF, downloadable individually &mdash; unless you tag images with consecutive dates, in which case that run combines into one PDF automatically.',
     audit: 'Upload an OF-286 (required, unsigned digital draft) plus any combination of the Agreement, Resource Order, and Shift Tickets/CTRs — the audit runs whatever cross-checks are possible with what you provide. Scanned copies of the Agreement, Resource Order, and OF-286 are read using OCR (handwriting and signatures aren\u2019t read) and flagged with a confidence note; a clean digital copy is still more reliable when you have one. EERA and Contract Crew (T2C/NCC) agreements are supported for header-only checks (contractor/agreement details); equipment matching and rate checks require a VIPR agreement.',
     sigprep: 'Upload a final invoice PDF, then have the contractor and the government reviewer sign right in this app — draw a signature and type a name/title, no Adobe or separate device needed. Every page that needs a signature gets one, automatically placed on the invoice’s signature block or, if a page (like a Deductions and Additions attachment) has no defined spot, near the bottom out of the way. The date is stamped in automatically. Works on phones and tablets. The signed PDF can’t be downloaded until both parties have signed.',
+    folders: 'Upload an IROC incident export (XML) to generate standardized folder names for every equipment agreement, contract crew, and contract overhead resource on the incident. Optionally upload a list of folders that already exist (or point it at a locally-synced OneDrive folder) so it skips anything already created. Preview the names, create the subfolders directly, or download a plain folder list and a spreadsheet of new contract numbers to track down CLINs for.',
   };
   tabBtns.forEach(btn => {
     btn.addEventListener('click', () => {
