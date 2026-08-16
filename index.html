@@ -1082,7 +1082,7 @@
   </div>
 
   <p class="beta-note">&#9888;&#65039; OCR (used for reading scanned Agreements, Resource Orders, and OF-286s) is currently in beta testing and can be unreliable, especially on handwriting and low-quality scans. Freshly downloaded, unscanned documents straight from VIPR, IROC, and e-iSuite are still preferred whenever you have them &mdash; use OCR results as a starting point to verify, not a final answer.</p>
-  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.17</p>
+  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.18</p>
   <div class="suggestion-wrap">
     <a class="suggestion-link" href="https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=urWTBhhLe02TQfMvQApUlLMtrc2YmxRJib_E55WLqt5UOTdBTFhSV09MVDVFOFpJODJISDlHUEhSMy4u" target="_blank" rel="noopener">Submit a Suggestion</a>
   </div>
@@ -6334,9 +6334,9 @@ async function applySignaturesToAllPages(fileBytes, {
   // badge in the CIMT CTR Generator tab (and this console line) never show
   // up, the page you're looking at is not actually running this script --
   // most likely a stale/cached copy of an older version of this file.
-  console.log('CIMT CTR Generator script started (build 2026-08-16-f).');
+  console.log('CIMT CTR Generator script started (build 2026-08-16-g).');
   const ctrgenBadgeEl = document.getElementById('ctrgenBuildBadge');
-  if (ctrgenBadgeEl) ctrgenBadgeEl.textContent = 'CTR Generator build: 2026-08-16-f (script is running)';
+  if (ctrgenBadgeEl) ctrgenBadgeEl.textContent = 'CTR Generator build: 2026-08-16-g (script is running)';
 
   // ===================== CIMT CTR Generator (Beta) =====================
   // Self-contained fillable "Individual CTR" PDF template (adapted from the
@@ -6736,7 +6736,9 @@ async function applySignaturesToAllPages(fileBytes, {
           const validRows = roster.filter(r => !r.error);
           const previewOutputs = [];
           for (const row of validRows) {
+            console.log(`CTR Generator: building preview for "${row.name}"\u2026`);
             previewOutputs.push(await ctrgenFillOne(row));
+            console.log(`CTR Generator: preview for "${row.name}" done.`);
           }
           ctrgenPreviewOutputs = previewOutputs;
           ctrgenPreviewIndex = 0;
@@ -6790,9 +6792,22 @@ async function applySignaturesToAllPages(fileBytes, {
     return (s || 'Unknown').replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim();
   }
 
+  // Wraps a promise so it can never hang forever silently -- if it doesn't
+  // settle within `ms`, we reject with a clear message instead of leaving
+  // the person staring at a page that looks frozen with no explanation.
+  function ctrgenWithTimeout(promise, ms, label) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`Timed out after ${Math.round(ms / 1000)}s while ${label} -- something in the PDF library got stuck rather than erroring out.`)), ms)),
+    ]);
+  }
+
   async function ctrgenFillOne(row) {
-    const pdfDoc = await PDFDocument.load(ctrgenTemplateBytes);
+    console.log(`CTR Generator: [${row.name}] loading template PDF\u2026`);
+    const pdfDoc = await ctrgenWithTimeout(PDFDocument.load(ctrgenTemplateBytes), 20000, `loading the template PDF for ${row.name}`);
+    console.log(`CTR Generator: [${row.name}] template loaded, getting form\u2026`);
     const form = pdfDoc.getForm();
+    console.log(`CTR Generator: [${row.name}] filling ${row.dates.length} day row(s)\u2026`);
     const setIfExists = (name, value) => {
       try { form.getTextField(name).setText(value || ''); } catch (e) { /* field not present, ignore */ }
     };
@@ -6810,6 +6825,7 @@ async function applySignaturesToAllPages(fileBytes, {
       setIfExists(`on2_row${n}`, row.on2);
       setIfExists(`off2_row${n}`, row.off2);
     });
+    console.log(`CTR Generator: [${row.name}] fields filled, saving PDF\u2026`);
     // The template ships with NeedAppearances=true so Acrobat/Preview show
     // typed text if someone fills it by hand in a PDF reader. Once we've
     // filled it here and pdf-lib has generated real appearance streams for
@@ -6818,7 +6834,8 @@ async function applySignaturesToAllPages(fileBytes, {
     // the AcroForm's shared default resources, which don't declare every
     // font tag our per-field appearances use, and the text fails to render.
     form.acroForm.dict.set(PDFName.of('NeedAppearances'), PDFBool.False);
-    const bytes = await pdfDoc.save();
+    const bytes = await ctrgenWithTimeout(pdfDoc.save(), 20000, `saving the filled PDF for ${row.name}`);
+    console.log(`CTR Generator: [${row.name}] PDF saved (${bytes.length} bytes).`);
     const filename = `CTR_${ctrgenSanitizeFilename(row.name)}_${ctrgenFmtDateMMDD(row.firstDay).replace('/', '-')}_to_${ctrgenFmtDateMMDD(row.lastDay).replace('/', '-')}.pdf`;
     return { filename, pdfBytes: bytes, row };
   }
@@ -6873,7 +6890,9 @@ async function applySignaturesToAllPages(fileBytes, {
       const failures = [];
       for (const row of validRows) {
         try {
+          console.log(`CTR Generator: generating final PDF for "${row.name}"\u2026`);
           outputs.push(await ctrgenFillOne(row));
+          console.log(`CTR Generator: final PDF for "${row.name}" done.`);
         } catch (err) {
           console.error('CTR generation error for', row.name, err);
           failures.push(`${row.name}: ${errMsg(err)}`);
