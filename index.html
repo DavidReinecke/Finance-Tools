@@ -1046,7 +1046,7 @@
       <button id="ctrgenGenerateBtn" type="button" disabled>Generate CTRs</button>
       <button id="ctrgenClearBtn" class="secondary" type="button">Clear</button>
       <div style="font-size:12px; color:var(--muted,#666); margin-top:4px;">
-        Fill in the incident info above (applied to every CTR), then download the template, fill one row per person, and upload it back. The template is a proper Excel table: First/Last Work Day are real date columns (click and pick a date, or type one), and Classification is a dropdown limited to FED, AD, or EFF/COOP. Each row becomes one CTR covering every day from First Work Day through Last Work Day (max 22 days &mdash; longer spans need to be split into two rows/forms). Times are 24-hour, e.g. 0600. Lunch Time is when lunch starts &mdash; a standard 30-minute unpaid lunch is assumed, so lunch end is calculated automatically. The Email Address column is for your records &mdash; this tool can't attach files to emails automatically (browser security), but each generated CTR gets a ready-to-send "Email this CTR" link so you just attach the file you downloaded.
+        Fill in the incident info above (applied to every CTR), then download the template, fill one row per person, and upload it back. The template is a proper Excel table: First/Last Work Day are real date columns (click and pick a date, or type one), and Classification is a dropdown limited to FED, AD, or EFF/COOP. Each row becomes one CTR covering every day from First Work Day through Last Work Day (max 22 days &mdash; longer spans need to be split into two rows/forms). Times are 24-hour, e.g. 0600. Lunch Time is when lunch starts &mdash; a standard 30-minute unpaid lunch is assumed, so lunch end is calculated automatically.
       </div>
       <div class="status" id="ctrgenStatus"></div>
     </div>
@@ -1082,7 +1082,7 @@
   </div>
 
   <p class="beta-note">&#9888;&#65039; OCR (used for reading scanned Agreements, Resource Orders, and OF-286s) is currently in beta testing and can be unreliable, especially on handwriting and low-quality scans. Freshly downloaded, unscanned documents straight from VIPR, IROC, and e-iSuite are still preferred whenever you have them &mdash; use OCR results as a starting point to verify, not a final answer.</p>
-  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.19</p>
+  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.21</p>
   <div class="suggestion-wrap">
     <a class="suggestion-link" href="https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=urWTBhhLe02TQfMvQApUlLMtrc2YmxRJib_E55WLqt5UOTdBTFhSV09MVDVFOFpJODJISDlHUEhSMy4u" target="_blank" rel="noopener">Submit a Suggestion</a>
   </div>
@@ -6716,16 +6716,9 @@ async function applySignaturesToAllPages(fileBytes, {
             }
           }
         }
-        // Email is only used for the optional "Email this CTR" convenience
-        // link, so a bad/placeholder address (e.g. "xxx") shouldn't block
-        // generating the CTR itself -- just skip that link for this row.
-        const emailValid = !email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-        const emailWarning = !emailValid ? 'email address looks invalid \u2014 no "Email this CTR" link will be shown' : null;
-
         roster.push({
-          rowNum, name, roNumber, classification, email: emailValid ? email : '', firstDay, lastDay, on1, off1, on2, off2, dates,
+          rowNum, name, roNumber, classification, email, firstDay, lastDay, on1, off1, on2, off2, dates,
           error: errors.length ? errors.join('; ') : null,
-          warning: emailWarning,
         });
       }
 
@@ -6783,9 +6776,7 @@ async function applySignaturesToAllPages(fileBytes, {
       const dateRange = (r.firstDay && r.lastDay) ? `${ctrgenFmtDateMMDD(r.firstDay)}\u2013${ctrgenFmtDateMMDD(r.lastDay)}` : '\u2014';
       const statusHtml = r.error
         ? `<span style="color:#b00020;">${r.error}</span>`
-        : r.warning
-          ? `<span style="color:#b07a00;">OK \u2014 ${r.warning}</span>`
-          : '<span style="color:#0a7a2a;">OK</span>';
+        : '<span style="color:#0a7a2a;">OK</span>';
       tr.innerHTML = `
         <td style="padding:6px 8px; border-bottom:1px solid var(--line,#eee);">${(r.name || '').replace(/</g, '&lt;')}</td>
         <td style="padding:6px 8px; border-bottom:1px solid var(--line,#eee);">${(r.roNumber || '').replace(/</g, '&lt;')}</td>
@@ -6802,6 +6793,27 @@ async function applySignaturesToAllPages(fileBytes, {
   // ---- Generate the filled CTR PDFs ----
   function ctrgenSanitizeFilename(s) {
     return (s || 'Unknown').replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim();
+  }
+
+  // RO numbers look like "O-14" or "O-12.2". For filenames: drop dashes,
+  // then turn any period into a dash (so "O-12.2" -> "O12-2").
+  function ctrgenRoForFilename(ro) {
+    const cleaned = (ro || 'UnknownRO').replace(/-/g, '').replace(/\./g, '-');
+    return ctrgenSanitizeFilename(cleaned);
+  }
+
+  // Filename date range: yymmdd-dd (e.g. "260814-18"). The year is always
+  // the current year (per NR6 convention -- incidents run in-season, so
+  // this avoids any ambiguity from a stray wrong-year date in the sheet).
+  // Month and start day come from First Work Day; end day from Last Work
+  // Day. If a span crosses a month boundary the end day alone won't show
+  // which month it's in -- that's an accepted tradeoff for this format.
+  function ctrgenFilenameDateRange(firstDay, lastDay) {
+    const yy = String(new Date().getFullYear()).slice(-2);
+    const mm = String(firstDay.getUTCMonth() + 1).padStart(2, '0');
+    const dd1 = String(firstDay.getUTCDate()).padStart(2, '0');
+    const dd2 = String(lastDay.getUTCDate()).padStart(2, '0');
+    return `${yy}${mm}${dd1}-${dd2}`;
   }
 
   // Wraps a promise so it can never hang forever silently -- if it doesn't
@@ -6848,7 +6860,7 @@ async function applySignaturesToAllPages(fileBytes, {
     form.acroForm.dict.set(PDFName.of('NeedAppearances'), PDFBool.False);
     const bytes = await ctrgenWithTimeout(pdfDoc.save(), 20000, `saving the filled PDF for ${row.name}`);
     console.log(`CTR Generator: [${row.name}] PDF saved (${bytes.length} bytes).`);
-    const filename = `CTR_${ctrgenSanitizeFilename(row.name)}_${ctrgenFmtDateMMDD(row.firstDay).replace('/', '-')}_to_${ctrgenFmtDateMMDD(row.lastDay).replace('/', '-')}.pdf`;
+    const filename = `CTR_${ctrgenRoForFilename(row.roNumber)}_${ctrgenFilenameDateRange(row.firstDay, row.lastDay)}.pdf`;
     return { filename, pdfBytes: bytes, row };
   }
 
@@ -6875,11 +6887,21 @@ async function applySignaturesToAllPages(fileBytes, {
     ctrgenNextBtn.disabled = ctrgenPreviewIndex === ctrgenPreviewOutputs.length - 1;
 
     ctrgenPreviewDownloadRow.innerHTML = '';
-    const dl = document.createElement('a');
-    dl.href = url;
-    dl.download = o.filename;
-    dl.textContent = `Download ${o.filename}`;
-    ctrgenPreviewDownloadRow.appendChild(dl);
+    const dlBtn = document.createElement('button');
+    dlBtn.type = 'button';
+    dlBtn.className = 'secondary';
+    dlBtn.style.width = 'auto';
+    dlBtn.style.padding = '8px 16px';
+    dlBtn.textContent = `Download ${o.filename}`;
+    dlBtn.addEventListener('click', () => {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = o.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    });
+    ctrgenPreviewDownloadRow.appendChild(dlBtn);
   }
 
   ctrgenPrevBtn.addEventListener('click', () => ctrgenShowPreviewAt(ctrgenPreviewIndex - 1));
@@ -6936,26 +6958,23 @@ async function applySignaturesToAllPages(fileBytes, {
     ctrgenOutputsList.innerHTML = '';
     if (!outputs.length) return;
     for (const o of outputs) {
-      const blob = new Blob([o.pdfBytes], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      const div = document.createElement('div');
-      div.style.marginTop = '6px';
-      const dl = document.createElement('a');
-      dl.href = url;
-      dl.download = o.filename;
-      dl.textContent = `Download ${o.filename}`;
-      div.appendChild(dl);
-      if (o.row.email) {
-        const mailtoUrl = 'mailto:' + encodeURIComponent(o.row.email) +
-          '?subject=' + encodeURIComponent(`Your Crew Time Report (${o.row.name})`) +
-          '&body=' + encodeURIComponent(`Hi ${o.row.name.split(',')[0] || o.row.name},\n\nAttached is your Crew Time Report covering ${ctrgenFmtDateMMDD(o.row.firstDay)}-${ctrgenFmtDateMMDD(o.row.lastDay)}. Please review and sign.\n\nThanks!`);
-        const mail = document.createElement('a');
-        mail.href = mailtoUrl;
-        mail.textContent = ' | Email this CTR (attach the file you just downloaded)';
-        mail.style.marginLeft = '4px';
-        div.appendChild(mail);
-      }
-      ctrgenOutputsList.appendChild(div);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'secondary';
+      btn.style.marginTop = '6px';
+      btn.textContent = `Download ${o.filename}`;
+      btn.addEventListener('click', () => {
+        const blob = new Blob([o.pdfBytes], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = o.filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+      });
+      ctrgenOutputsList.appendChild(btn);
     }
     appendDownloadAllButton(ctrgenOutputsList, outputs, 'CIMT_CTRs.zip');
   }
