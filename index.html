@@ -1066,13 +1066,22 @@
         <tbody id="ctrgenPreviewBody"></tbody>
       </table>
       </div>
+      <div id="ctrgenPdfPreview" style="display:none; margin-top:14px;">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+          <button id="ctrgenPrevBtn" class="secondary" type="button" style="width:auto; padding:6px 14px;">&larr; Prev</button>
+          <div id="ctrgenPreviewLabel" style="flex:1; text-align:center; font-weight:600; font-size:13px;"></div>
+          <button id="ctrgenNextBtn" class="secondary" type="button" style="width:auto; padding:6px 14px;">Next &rarr;</button>
+        </div>
+        <iframe id="ctrgenPdfFrame" title="CTR preview" style="width:100%; height:520px; border:1px solid var(--line,#ccc); border-radius:6px; background:#fff;"></iframe>
+        <div id="ctrgenPreviewDownloadRow" style="margin-top:8px; font-size:13px;"></div>
+      </div>
       <div id="ctrgenOutputsList" style="margin-top:12px;"></div>
     </div>
   </div>
   </div>
 
   <p class="beta-note">&#9888;&#65039; OCR (used for reading scanned Agreements, Resource Orders, and OF-286s) is currently in beta testing and can be unreliable, especially on handwriting and low-quality scans. Freshly downloaded, unscanned documents straight from VIPR, IROC, and e-iSuite are still preferred whenever you have them &mdash; use OCR results as a starting point to verify, not a final answer.</p>
-  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.13</p>
+  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.14</p>
   <div class="suggestion-wrap">
     <a class="suggestion-link" href="https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=urWTBhhLe02TQfMvQApUlLMtrc2YmxRJib_E55WLqt5UOTdBTFhSV09MVDVFOFpJODJISDlHUEhSMy4u" target="_blank" rel="noopener">Submit a Suggestion</a>
   </div>
@@ -6374,9 +6383,18 @@ async function applySignaturesToAllPages(fileBytes, {
   const ctrgenPreviewTable = document.getElementById('ctrgenPreviewTable');
   const ctrgenPreviewBody = document.getElementById('ctrgenPreviewBody');
   const ctrgenOutputsList = document.getElementById('ctrgenOutputsList');
+  const ctrgenPdfPreview = document.getElementById('ctrgenPdfPreview');
+  const ctrgenPrevBtn = document.getElementById('ctrgenPrevBtn');
+  const ctrgenNextBtn = document.getElementById('ctrgenNextBtn');
+  const ctrgenPreviewLabel = document.getElementById('ctrgenPreviewLabel');
+  const ctrgenPdfFrame = document.getElementById('ctrgenPdfFrame');
+  const ctrgenPreviewDownloadRow = document.getElementById('ctrgenPreviewDownloadRow');
 
   let ctrgenSelectedFile = null;
   let ctrgenRoster = []; // parsed rows, each { name, classification, email, firstDay, lastDay, on1, off1, on2, off2, dates, error, rowNum }
+  let ctrgenPreviewOutputs = []; // generated { filename, pdfBytes, row } used for the Prev/Next preview
+  let ctrgenPreviewIndex = 0;
+  let ctrgenPreviewBlobUrls = []; // tracked so we can revoke them when rebuilding the preview
 
   function ctrgenShowStatus(kind, msg) {
     ctrgenStatusEl.className = 'status ' + (kind || '');
@@ -6385,6 +6403,16 @@ async function applySignaturesToAllPages(fileBytes, {
 
   function ctrgenResetOutputs() {
     ctrgenOutputsList.innerHTML = '';
+  }
+
+  function ctrgenClosePreview() {
+    ctrgenPreviewBlobUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch (e) { /* ignore */ } });
+    ctrgenPreviewBlobUrls = [];
+    ctrgenPreviewOutputs = [];
+    ctrgenPreviewIndex = 0;
+    ctrgenPdfPreview.style.display = 'none';
+    ctrgenPdfFrame.src = 'about:blank';
+    ctrgenPreviewDownloadRow.innerHTML = '';
   }
 
   // ---- Template download ----
@@ -6430,6 +6458,7 @@ async function applySignaturesToAllPages(fileBytes, {
     ctrgenPreviewBody.innerHTML = '';
     ctrgenPreviewSummary.innerHTML = '';
     ctrgenResetOutputs();
+    ctrgenClosePreview();
     ctrgenShowStatus('', '');
   }
 
@@ -6445,6 +6474,7 @@ async function applySignaturesToAllPages(fileBytes, {
     ctrgenPreviewBody.innerHTML = '';
     ctrgenPreviewSummary.innerHTML = '';
     ctrgenResetOutputs();
+    ctrgenClosePreview();
     ctrgenShowStatus('', '');
   });
 
@@ -6650,13 +6680,28 @@ async function applySignaturesToAllPages(fileBytes, {
       ctrgenRoster = roster;
       ctrgenRenderPreview();
       const okCount = roster.filter(r => !r.error).length;
+      ctrgenClosePreview();
       if (!roster.length) {
         ctrgenShowStatus('error', 'No employee rows found. Make sure you filled in the template starting at row 2 and removed the example row (or left it \u2014 it\'s skipped automatically).');
       } else if (okCount === 0) {
         ctrgenShowStatus('error', `Found ${roster.length} row(s), but all of them have errors \u2014 see the Status column below.`);
       } else {
-        ctrgenShowStatus('success', `Found ${roster.length} row(s), ${okCount} ready to generate.`);
         ctrgenGenerateBtn.disabled = false;
+        ctrgenShowStatus('', `Found ${roster.length} row(s), ${okCount} ready to generate. Building preview\u2026`);
+        try {
+          const validRows = roster.filter(r => !r.error);
+          const previewOutputs = [];
+          for (const row of validRows) {
+            previewOutputs.push(await ctrgenFillOne(row));
+          }
+          ctrgenPreviewOutputs = previewOutputs;
+          ctrgenPreviewIndex = 0;
+          ctrgenShowPreviewAt(0);
+          ctrgenShowStatus('success', `Found ${roster.length} row(s), ${okCount} ready to generate. Preview below \u2014 use Prev/Next to check each person, then click Generate CTRs to download.`);
+        } catch (err) {
+          console.error('CTR preview build error:', err);
+          ctrgenShowStatus('error', `Found ${roster.length} row(s), ${okCount} ready to generate, but the preview couldn't be built: ${errMsg(err)}. You can still try Generate CTRs.`);
+        }
       }
     } catch (err) {
       console.error('CTR roster parse error:', err);
@@ -6734,29 +6779,73 @@ async function applySignaturesToAllPages(fileBytes, {
     return { filename, pdfBytes: bytes, row };
   }
 
+  // ---- PDF preview with Prev/Next navigation ----
+  function ctrgenShowPreviewAt(idx) {
+    if (!ctrgenPreviewOutputs.length) { ctrgenClosePreview(); return; }
+    ctrgenPreviewIndex = Math.max(0, Math.min(idx, ctrgenPreviewOutputs.length - 1));
+    const o = ctrgenPreviewOutputs[ctrgenPreviewIndex];
+
+    // Revoke the previous blob URL for this slot (if any) before making a
+    // new one, so we don't leak memory as someone pages back and forth.
+    if (ctrgenPreviewBlobUrls[ctrgenPreviewIndex]) {
+      URL.revokeObjectURL(ctrgenPreviewBlobUrls[ctrgenPreviewIndex]);
+    }
+    const blob = new Blob([o.pdfBytes], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    ctrgenPreviewBlobUrls[ctrgenPreviewIndex] = url;
+
+    ctrgenPdfPreview.style.display = '';
+    ctrgenPdfFrame.src = url;
+    const dateRange = `${ctrgenFmtDateMMDD(o.row.firstDay)}\u2013${ctrgenFmtDateMMDD(o.row.lastDay)}`;
+    ctrgenPreviewLabel.textContent = `${ctrgenPreviewIndex + 1} of ${ctrgenPreviewOutputs.length}: ${o.row.name} (${dateRange})`;
+    ctrgenPrevBtn.disabled = ctrgenPreviewIndex === 0;
+    ctrgenNextBtn.disabled = ctrgenPreviewIndex === ctrgenPreviewOutputs.length - 1;
+
+    ctrgenPreviewDownloadRow.innerHTML = '';
+    const dl = document.createElement('a');
+    dl.href = url;
+    dl.download = o.filename;
+    dl.textContent = `Download ${o.filename}`;
+    ctrgenPreviewDownloadRow.appendChild(dl);
+  }
+
+  ctrgenPrevBtn.addEventListener('click', () => ctrgenShowPreviewAt(ctrgenPreviewIndex - 1));
+  ctrgenNextBtn.addEventListener('click', () => ctrgenShowPreviewAt(ctrgenPreviewIndex + 1));
+
   ctrgenGenerateBtn.addEventListener('click', async () => {
     const validRows = ctrgenRoster.filter(r => !r.error);
     if (!validRows.length) return;
     ctrgenGenerateBtn.disabled = true;
     ctrgenResetOutputs();
     ctrgenShowStatus('', `Generating ${validRows.length} CTR(s)\u2026`);
-    const outputs = [];
-    const failures = [];
-    for (const row of validRows) {
-      try {
-        outputs.push(await ctrgenFillOne(row));
-      } catch (err) {
-        console.error('CTR generation error for', row.name, err);
-        failures.push(`${row.name}: ${errMsg(err)}`);
+    try {
+      const outputs = [];
+      const failures = [];
+      for (const row of validRows) {
+        try {
+          outputs.push(await ctrgenFillOne(row));
+        } catch (err) {
+          console.error('CTR generation error for', row.name, err);
+          failures.push(`${row.name}: ${errMsg(err)}`);
+        }
       }
+      ctrgenRenderOutputs(outputs);
+      if (failures.length) {
+        ctrgenShowStatus('error', `Generated ${outputs.length} of ${validRows.length}. Failed: ${failures.join('; ')}`);
+      } else if (!outputs.length) {
+        ctrgenShowStatus('error', 'Nothing was generated. Please try again, or use Preview Roster first to check for problems.');
+      } else {
+        ctrgenShowStatus('success', `Generated ${outputs.length} CTR${outputs.length === 1 ? '' : 's'}. Download below, or grab them all as a zip.`);
+      }
+    } catch (err) {
+      // Belt-and-suspenders: catches anything unexpected outside the
+      // per-row loop (e.g. a rendering error) so the button never gets
+      // stuck disabled with no explanation on screen.
+      console.error('CTR generation failed unexpectedly:', err);
+      ctrgenShowStatus('error', 'Something went wrong generating the CTRs: ' + errMsg(err));
+    } finally {
+      ctrgenGenerateBtn.disabled = false;
     }
-    ctrgenRenderOutputs(outputs);
-    if (failures.length) {
-      ctrgenShowStatus('error', `Generated ${outputs.length} of ${validRows.length}. Failed: ${failures.join('; ')}`);
-    } else {
-      ctrgenShowStatus('success', `Generated ${outputs.length} CTR${outputs.length === 1 ? '' : 's'}. Download below, or grab them all as a zip.`);
-    }
-    ctrgenGenerateBtn.disabled = false;
   });
 
   function ctrgenRenderOutputs(outputs) {
