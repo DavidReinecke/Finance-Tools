@@ -1081,7 +1081,7 @@
   </div>
 
   <p class="beta-note">&#9888;&#65039; OCR (used for reading scanned Agreements, Resource Orders, and OF-286s) is currently in beta testing and can be unreliable, especially on handwriting and low-quality scans. Freshly downloaded, unscanned documents straight from VIPR, IROC, and e-iSuite are still preferred whenever you have them &mdash; use OCR results as a starting point to verify, not a final answer.</p>
-  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.15</p>
+  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.16</p>
   <div class="suggestion-wrap">
     <a class="suggestion-link" href="https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=urWTBhhLe02TQfMvQApUlLMtrc2YmxRJib_E55WLqt5UOTdBTFhSV09MVDVFOFpJODJISDlHUEhSMy4u" target="_blank" rel="noopener">Submit a Suggestion</a>
   </div>
@@ -6634,7 +6634,10 @@ async function applySignaturesToAllPages(fileBytes, {
 
   // ---- Parse & validate the roster ----
   ctrgenParseBtn.addEventListener('click', async () => {
-    if (!ctrgenSelectedFile) return;
+    if (!ctrgenSelectedFile) {
+      ctrgenShowStatus('error', 'No file is selected yet. Click the dropzone above (or drag a file onto it) to choose your filled-in roster .xlsx first.');
+      return;
+    }
     ctrgenParseBtn.disabled = true;
     ctrgenGenerateBtn.disabled = true;
     ctrgenShowStatus('', 'Reading the spreadsheet\u2026');
@@ -6845,7 +6848,12 @@ async function applySignaturesToAllPages(fileBytes, {
 
   ctrgenGenerateBtn.addEventListener('click', async () => {
     const validRows = ctrgenRoster.filter(r => !r.error);
-    if (!validRows.length) return;
+    if (!validRows.length) {
+      ctrgenShowStatus('error', ctrgenRoster.length
+        ? 'None of the parsed rows are error-free, so there\u2019s nothing valid to generate. Check the Status column in the preview table above and fix those rows, then click Preview Roster again.'
+        : 'Nothing has been parsed yet. Click Preview Roster first so the tool can read and validate your roster.');
+      return;
+    }
     ctrgenGenerateBtn.disabled = true;
     ctrgenResetOutputs();
     ctrgenShowStatus('', `Generating ${validRows.length} CTR(s)\u2026`);
