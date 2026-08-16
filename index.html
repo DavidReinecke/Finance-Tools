@@ -930,7 +930,7 @@
   </div>
   </div>
 
-  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Contact david_reinecke@firenet.gov for questions, comments, or concerns<br>Version 5.12</p>
+  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Contact david_reinecke@firenet.gov for questions, comments, or concerns<br>Version 6.0</p>
 </div>
 
 <script src="./ocr/tesseract.min.js"></script>
@@ -1511,8 +1511,9 @@ function buildOrderedFields(allFields) {
   return ordered;
 }
 
-async function processContract(fileArrayBuffer, clinInput, fileName) {
+async function processContract(file, clinInput, fileName, statusCb) {
   const clinTarget = normalizeClin(clinInput);
+  const fileArrayBuffer = await file.arrayBuffer();
 
   let pdfDoc;
   try {
@@ -1522,7 +1523,27 @@ async function processContract(fileArrayBuffer, clinInput, fileName) {
     // (can happen under strict browser security policies).
     pdfDoc = await pdfjsLib.getDocument({ data: fileArrayBuffer.slice(0), disableWorker: true }).promise;
   }
-  const allLines = await extractAllLines(pdfDoc);
+  let allLines = await extractAllLines(pdfDoc);
+  let usedOcr = false;
+  let ocrConf = null;
+  if (isLikelyScannedFromLines(allLines)) {
+    // No extractable text layer -- this is a scanned (image-only)
+    // agreement. Fall back to OCR of the typed/printed content so the CLIN
+    // can still be located, rather than refusing outright.
+    try {
+      if (statusCb) statusCb('Agreement looks scanned -- running OCR...');
+      const ocrResult = await ocrPdfToLines(file, statusCb);
+      allLines = ocrResult.allLines;
+      usedOcr = true;
+      ocrConf = ocrResult.overallConf;
+      if (isLikelyScannedFromLines(allLines)) {
+        throw new Error(SCAN_GUIDANCE.agreement + ' (OCR was attempted but could not read enough text from the scan.)');
+      }
+    } catch (ocrErr) {
+      if (ocrErr && ocrErr.message && ocrErr.message.indexOf(SCAN_GUIDANCE.agreement) === 0) throw ocrErr;
+      throw new Error(SCAN_GUIDANCE.agreement + ' (OCR fallback also failed: ' + ((ocrErr && ocrErr.message) || ocrErr) + ')');
+    }
+  }
 
   const { clinIdx, startIdx, endIdx } = findClinBlock(allLines, clinTarget);
   const clinResult = collectClinHighlights(allLines, clinIdx, startIdx, endIdx);
@@ -1565,6 +1586,8 @@ async function processContract(fileArrayBuffer, clinInput, fileName) {
     pageCount: keepPages.length,
     pagesUsed: keepPages.map(p => p + 1),
     fields: allFields,
+    usedOcr,
+    ocrConf,
   };
 }
 
@@ -1636,6 +1659,12 @@ async function extractPdfFullText(file) {
 
 function isLikelyScanned(pageTexts) {
   const totalChars = pageTexts.reduce((sum, t) => sum + t.replace(/\s/g, '').length, 0);
+  return totalChars < SCAN_TEXT_THRESHOLD;
+}
+// Same scan-detection heuristic, but for callers that already have a `lines`
+// array (from extractAllLines) rather than separate per-page text strings.
+function isLikelyScannedFromLines(lines) {
+  const totalChars = lines.reduce((sum, l) => sum + l.text.replace(/\s/g, '').length, 0);
   return totalChars < SCAN_TEXT_THRESHOLD;
 }
 
@@ -1711,6 +1740,48 @@ async function ocrPdfToLines(file, statusCb) {
   const validConfs = pageConfidences.filter(c => c !== null);
   const overallConf = validConfs.length ? (validConfs.reduce((a, b) => a + b, 0) / validConfs.length) : null;
   return { pageTexts, allLines, pageConfidences, overallConf };
+}
+
+// Shared wrapper: reads a PDF's text/lines natively, and if it looks
+// scanned, transparently falls back to the OCR engine above. Used by every
+// document-reading entry point in the tool (Agreement Processor, Resource
+// Order auto-fill, and the OF-286 Audit's Agreement/Resource Order/OF-286
+// readers) so the OCR fallback behaves identically everywhere.
+//   opts.docLabel    - short name used in status messages, e.g. "Agreement"
+//   opts.guidanceMsg - the SCAN_GUIDANCE.* message to throw if OCR also fails
+//   opts.statusCb    - optional progress callback
+// Returns { pageTexts, lines, usedOcr, ocrConf }. `lines` is always
+// populated (built either from extractAllLines or from the OCR fallback).
+async function extractPdfWithOcrFallback(file, opts) {
+  opts = opts || {};
+  let pageTexts, lines;
+  try {
+    pageTexts = await extractPdfFullText(file);
+    const buffer = await file.arrayBuffer();
+    const pdfDoc = await pdfjsLib.getDocument({ data: buffer.slice(0), disableWorker: true }).promise;
+    lines = await extractAllLines(pdfDoc);
+  } catch (e) {
+    throw new Error(`Could not read the ${opts.docLabel || 'document'} PDF: ` + ((e && e.message) || e));
+  }
+  let usedOcr = false, ocrConf = null;
+  if (isLikelyScanned(pageTexts)) {
+    try {
+      if (opts.statusCb) opts.statusCb(`${opts.docLabel || 'Document'} looks scanned -- running OCR...`);
+      const ocrResult = await ocrPdfToLines(file, opts.statusCb);
+      pageTexts = ocrResult.pageTexts;
+      lines = ocrResult.allLines;
+      usedOcr = true;
+      ocrConf = ocrResult.overallConf;
+      if (isLikelyScanned(pageTexts)) {
+        throw new Error((opts.guidanceMsg || 'That document looks scanned and could not be read.') + ' (OCR was attempted but could not read enough text from the scan.)');
+      }
+    } catch (ocrErr) {
+      const guidance = opts.guidanceMsg || 'That document looks scanned and could not be read.';
+      if (ocrErr && ocrErr.message && ocrErr.message.indexOf(guidance) === 0) throw ocrErr;
+      throw new Error(guidance + ' (OCR fallback also failed: ' + ((ocrErr && ocrErr.message) || ocrErr) + ')');
+    }
+  }
+  return { pageTexts, lines, usedOcr, ocrConf };
 }
 
 // ---------- Position-based line helpers (labels and values are often in
@@ -2268,15 +2339,12 @@ async function runAudit(agreementFile, of286File, roFile, shiftFiles, statusCb) 
   let crewSections = [];
   if (agreementFile) {
     statusCb('Reading Agreement...');
-    let agreementPageTexts;
-    try {
-      agreementPageTexts = await extractPdfFullText(agreementFile);
-    } catch (e) {
-      throw new Error('Could not read the Agreement PDF: ' + ((e && e.message) || e));
-    }
-    if (isLikelyScanned(agreementPageTexts)) {
-      throw new Error(SCAN_GUIDANCE.agreement);
-    }
+    const agRead = await extractPdfWithOcrFallback(agreementFile, {
+      docLabel: 'Agreement',
+      guidanceMsg: SCAN_GUIDANCE.agreement,
+      statusCb,
+    });
+    let agreementPageTexts = agRead.pageTexts;
     const agType = detectAgreementType(agreementPageTexts.join('\n'));
     if (agType === 'EERA') {
       isEERA = true;
@@ -2299,50 +2367,29 @@ async function runAudit(agreementFile, of286File, roFile, shiftFiles, statusCb) 
       }
       report.errors.push('This is a Contract Crew agreement -- header fields (contractor and agreement details) are audited.');
     } else {
-      const agreementBuffer = await agreementFile.arrayBuffer();
-      const agreementPdfDoc = await pdfjsLib.getDocument({ data: agreementBuffer.slice(0), disableWorker: true }).promise;
-      agreementLines = await extractAllLines(agreementPdfDoc);
+      agreementLines = agRead.lines;
       const agreementAdmin = collectAdminHighlights(agreementLines, agreementFile.name);
       for (const f of agreementAdmin.fields) agFields[f.label] = f.value;
+    }
+    if (agRead.usedOcr) {
+      const confStr = (agRead.ocrConf === null) ? 'unknown' : `${Math.round(agRead.ocrConf)}%`;
+      addCheck('OCR Used for This Agreement', 'warn',
+        `This Agreement appears to be a scanned image, so its typed/printed text was read using OCR instead of the digital PDF text layer. Overall OCR confidence: ${confStr}. Handwritten entries and signatures are not read by OCR. Please double-check Agreement-derived fields (Contractor Name/Address, UEI, Agreement Number, Effective Dates, CLIN rates) against the original scan.`);
     }
   } else {
     report.errors.push('No Agreement provided -- skipped all Agreement-based checks (Contractor Name/Address, UEI, Agreement Number, Effective Dates, equipment/CLIN matching, rate check).');
   }
 
   statusCb('Reading OF-286...');
-  let of286PageTexts, of286Lines;
-  let of286UsedOcr = false;
-  let of286OcrConf = null;
-  try {
-    of286PageTexts = await extractPdfFullText(of286File);
-    const of286Buffer = await of286File.arrayBuffer();
-    const of286PdfDoc = await pdfjsLib.getDocument({ data: of286Buffer.slice(0), disableWorker: true }).promise;
-    of286Lines = await extractAllLines(of286PdfDoc);
-  } catch (e) {
-    throw new Error('Could not read the OF-286 PDF: ' + ((e && e.message) || e));
-  }
-  if (isLikelyScanned(of286PageTexts)) {
-    // No extractable text layer -- this is a scanned (image-only) OF-286.
-    // Fall back to OCR of the typed/printed form content rather than
-    // refusing outright, so the rest of the audit pipeline can still run.
-    try {
-      statusCb('OF-286 looks scanned -- running OCR...');
-      const ocrResult = await ocrPdfToLines(of286File, statusCb);
-      of286PageTexts = ocrResult.pageTexts;
-      of286Lines = ocrResult.allLines;
-      of286UsedOcr = true;
-      of286OcrConf = ocrResult.overallConf;
-      if (isLikelyScanned(of286PageTexts)) {
-        // OCR itself found essentially nothing readable -- this is likely a
-        // very poor scan, or a handwritten/non-form document. Only typed
-        // content is supported, so fall back to the original guidance.
-        throw new Error(SCAN_GUIDANCE.of286 + ' (OCR was attempted but could not read enough text from the scan.)');
-      }
-    } catch (ocrErr) {
-      if (ocrErr && ocrErr.message && ocrErr.message.indexOf(SCAN_GUIDANCE.of286) === 0) throw ocrErr;
-      throw new Error(SCAN_GUIDANCE.of286 + ' (OCR fallback also failed: ' + ((ocrErr && ocrErr.message) || ocrErr) + ')');
-    }
-  }
+  const of286Read = await extractPdfWithOcrFallback(of286File, {
+    docLabel: 'OF-286',
+    guidanceMsg: SCAN_GUIDANCE.of286,
+    statusCb,
+  });
+  const of286PageTexts = of286Read.pageTexts;
+  const of286Lines = of286Read.lines;
+  const of286UsedOcr = of286Read.usedOcr;
+  const of286OcrConf = of286Read.ocrConf;
   const of286Invoices = splitOF286IntoInvoices(of286PageTexts, of286Lines);
   // Equipment/agreement-level fields (contractor, UEI, agreement number,
   // effective dates, unique ID, point of hire, resource order number) are
@@ -2359,16 +2406,13 @@ async function runAudit(agreementFile, of286File, roFile, shiftFiles, statusCb) 
   let roResult = { contractNum: null, clin: null, resourceOrderNumber: null, incidentNumber: null, incidentName: null };
   if (roFile) {
     statusCb('Reading Resource Order...');
-    let roPageTexts;
     try {
-      roPageTexts = await extractPdfFullText(roFile);
-    } catch (e) {
-      throw new Error('Could not read the Resource Order PDF: ' + ((e && e.message) || e));
-    }
-    if (isLikelyScanned(roPageTexts)) {
-      report.errors.push('The Resource Order looks like a scanned image rather than a clean digital PDF, so it could not be read -- all Resource-Order-based checks were skipped. Please download a clean, unscanned copy from IROC to have those checks run.');
-    } else {
-      for (const text of roPageTexts) {
+      const roRead = await extractPdfWithOcrFallback(roFile, {
+        docLabel: 'Resource Order',
+        guidanceMsg: 'The Resource Order looks like a scanned image and could not be read.',
+        statusCb,
+      });
+      for (const text of roRead.pageTexts) {
         const r = extractROText(text);
         if (r.contractNum) roResult.contractNum = r.contractNum;
         if (r.clin) roResult.clin = r.clin;
@@ -2376,6 +2420,15 @@ async function runAudit(agreementFile, of286File, roFile, shiftFiles, statusCb) 
         if (r.incidentNumber) roResult.incidentNumber = r.incidentNumber;
         if (r.incidentName) roResult.incidentName = r.incidentName;
       }
+      if (roRead.usedOcr) {
+        const confStr = (roRead.ocrConf === null) ? 'unknown' : `${Math.round(roRead.ocrConf)}%`;
+        addCheck('OCR Used for This Resource Order', 'warn',
+          `This Resource Order appears to be a scanned image, so it was read using OCR instead of the digital PDF text layer. Overall OCR confidence: ${confStr}. Please double-check the Contract Number, CLIN, and Resource Order Number against the original scan.`);
+      }
+    } catch (e) {
+      // Resource Order checks are supplementary -- degrade gracefully rather
+      // than halting the whole audit, same as an unreadable/missing RO.
+      report.errors.push('The Resource Order could not be read (even with OCR), so all Resource-Order-based checks were skipped: ' + ((e && e.message) || e));
     }
   } else {
     report.errors.push('No Resource Order provided -- skipped all Resource-Order-based checks.');
@@ -3094,7 +3147,7 @@ async function applySignaturesToAllPages(fileBytes, {
     clin: "Upload a Forest Service VIPR equipment rental agreement and a CLIN number. Get back a 3-page PDF (cover page, vendor info, and that CLIN's equipment record) with the key fields highlighted, plus copyable values for pasting elsewhere. Runs entirely in your browser — nothing is uploaded anywhere.",
     breakdown: "Enter the shift and breakdown times, daily equipment/transport rates, and (optionally) a shift ticket. Get back a completed Breakdown Deduction Worksheet PDF with all the math already done — no Acrobat, no manual calculation, no fillable-field headaches.",
     imgpdf: 'Drop in images (or a ZIP of images) and each one becomes its own PDF, downloadable individually &mdash; unless you tag images with consecutive dates, in which case that run combines into one PDF automatically.',
-    audit: 'Upload an OF-286 (required, unsigned digital draft) plus any combination of the Agreement, Resource Order, and Shift Tickets/CTRs — the audit runs whatever cross-checks are possible with what you provide. All documents must be clean, non-scanned copies (VIPR website for the Agreement, IROC for the Resource Order); scanned files are rejected since they can’t be read reliably. EERA and Contract Crew (T2C/NCC) agreements are supported for header-only checks (contractor/agreement details); equipment matching and rate checks require a VIPR agreement.',
+    audit: 'Upload an OF-286 (required, unsigned digital draft) plus any combination of the Agreement, Resource Order, and Shift Tickets/CTRs — the audit runs whatever cross-checks are possible with what you provide. Scanned copies of the Agreement, Resource Order, and OF-286 are read using OCR (handwriting and signatures aren\u2019t read) and flagged with a confidence note; a clean digital copy is still more reliable when you have one. EERA and Contract Crew (T2C/NCC) agreements are supported for header-only checks (contractor/agreement details); equipment matching and rate checks require a VIPR agreement.',
     sigprep: 'Upload a final invoice PDF, then have the contractor and the government reviewer sign right in this app — draw a signature and type a name/title, no Adobe or separate device needed. Every page that needs a signature gets one, automatically placed on the invoice’s signature block or, if a page (like a Deductions and Additions attachment) has no defined spot, near the bottom out of the way. The date is stamped in automatically. Works on phones and tablets. The signed PDF can’t be downloaded until both parties have signed.',
   };
   tabBtns.forEach(btn => {
@@ -3174,13 +3227,13 @@ async function applySignaturesToAllPages(fileBytes, {
     roDzFname.textContent = file.name;
     showStatus('info', 'Reading Resource Order&hellip;');
     try {
-      const pageTexts = await extractPdfFullText(file);
-      if (isLikelyScanned(pageTexts)) {
-        showStatus('error', 'That Resource Order looks like a scanned image — please upload a clean copy from IROC so the CLIN and Resource Order Number can be read automatically, or enter them manually below.');
-        return;
-      }
+      const roRead = await extractPdfWithOcrFallback(file, {
+        docLabel: 'Resource Order',
+        guidanceMsg: 'That Resource Order looks like a scanned image and could not be read. Please upload a clean copy from IROC so the CLIN and Resource Order Number can be read automatically, or enter them manually below.',
+        statusCb: (msg) => showStatus('info', msg),
+      });
       const combined = { contractNum: null, clin: null, resourceOrderNumber: null };
-      for (const text of pageTexts) {
+      for (const text of roRead.pageTexts) {
         const r = extractROText(text);
         if (r.contractNum) combined.contractNum = r.contractNum;
         if (r.clin) combined.clin = r.clin;
@@ -3190,13 +3243,16 @@ async function applySignaturesToAllPages(fileBytes, {
       if (combined.clin) clinInput.value = combined.clin;
       if (combined.resourceOrderNumber) resourceOrderInput.value = combined.resourceOrderNumber;
       updateRunButton();
+      const ocrNote = roRead.usedOcr
+        ? ` (read via OCR, confidence: ${roRead.ocrConf === null ? 'unknown' : Math.round(roRead.ocrConf) + '%'} -- please verify)`
+        : '';
       if (!combined.clin && !combined.resourceOrderNumber) {
         showStatus('error', 'Could not find a CLIN or Resource Order Number on that Resource Order — please enter them manually below.');
       } else {
         const parts = [];
         if (combined.clin) parts.push(`CLIN ${combined.clin}`);
         if (combined.resourceOrderNumber) parts.push(`Resource Order ${combined.resourceOrderNumber}`);
-        showStatus('info', `Auto-filled from Resource Order — ${parts.join(', ')}.`);
+        showStatus('info', `Auto-filled from Resource Order — ${parts.join(', ')}.${ocrNote}`);
       }
     } catch (e) {
       showStatus('error', 'Could not read the Resource Order PDF: ' + e.message);
@@ -3280,8 +3336,7 @@ async function applySignaturesToAllPages(fileBytes, {
     fieldsPanel.classList.remove('show');
     fieldsPanel.innerHTML = '';
     try {
-      const arrayBuffer = await selectedFile.arrayBuffer();
-      const result = await processContract(arrayBuffer, clinInput.value.trim(), selectedFile.name);
+      const result = await processContract(selectedFile, clinInput.value.trim(), selectedFile.name, (msg) => showStatus('info', msg));
       const blob = new Blob([result.bytes], {type: 'application/pdf'});
       const url = URL.createObjectURL(blob);
 
@@ -3299,10 +3354,13 @@ async function applySignaturesToAllPages(fileBytes, {
 
       const cleanedResourceOrder = resourceOrderInput.value.trim().replace(/-/g, '');
       const outName = `AGMT_${cleanedResourceOrder}.pdf`;
+      const ocrNote = result.usedOcr
+        ? `<br>&#9888;&#65039; This Agreement was scanned, so it was read using OCR (confidence: ${result.ocrConf === null ? 'unknown' : Math.round(result.ocrConf) + '%'}). Handwriting and signatures aren't read by OCR -- please verify the highlighted fields above against the original scan.`
+        : '';
       showStatus('success',
         `Done &mdash; found ${result.clinTarget} on page(s) ${result.pagesUsed.slice(2).join(', ') || result.pagesUsed.join(', ')}. ` +
         `Output is ${result.pageCount} pages.<br>` +
-        `<a href="${url}" download="${outName}">Download ${outName}</a>`
+        `<a href="${url}" download="${outName}">Download ${outName}</a>` + ocrNote
       );
       renderFieldsPanel(result.fields);
     } catch (err) {
