@@ -411,6 +411,31 @@
     line-height: 1.5;
     text-align: center;
   }
+  .beta-note {
+    margin-top: 32px;
+    padding: 12px 16px;
+    background: var(--amber-bg);
+    border: 1px solid var(--amber);
+    border-radius: 8px;
+    color: var(--amber);
+    font-size: 12.5px;
+    line-height: 1.5;
+    text-align: center;
+  }
+  .suggestion-wrap { text-align: center; margin-top: 22px; }
+  .suggestion-link {
+    display: inline-block;
+    padding: 10px 22px;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--focus);
+    background: var(--card);
+    border: 1.5px solid var(--line);
+    border-radius: 7px;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .suggestion-link:hover { border-color: var(--focus); opacity: 1; }
   .sig-pad-wrap {
     background: #fdfdfb;
     border: 1px solid var(--line);
@@ -740,7 +765,7 @@
       <div class="field">
         <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
           <input type="checkbox" id="bAllDay" style="width:auto;">
-          Breakdown was all day (deduction equals the full daily rate)
+          Breakdown was the entire shift (deduction equals the full daily rate)
         </label>
       </div>
       <div class="field-row">
@@ -991,7 +1016,11 @@
   </div>
   </div>
 
-  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Contact david_reinecke@firenet.gov for questions, comments, or concerns<br>Version 6.5</p>
+  <p class="beta-note">&#9888;&#65039; OCR (used for reading scanned Agreements, Resource Orders, and OF-286s) is currently in beta testing and can be unreliable, especially on handwriting and low-quality scans. Freshly downloaded, unscanned documents straight from VIPR, IROC, and e-iSuite are still preferred whenever you have them &mdash; use OCR results as a starting point to verify, not a final answer.</p>
+  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Contact david_reinecke@firenet.gov for questions, comments, or concerns<br>Version 6.8</p>
+  <div class="suggestion-wrap">
+    <a class="suggestion-link" href="https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=urWTBhhLe02TQfMvQApUlLMtrc2YmxRJib_E55WLqt5UOTdBTFhSV09MVDVFOFpJODJISDlHUEhSMy4u" target="_blank" rel="noopener">Submit a Suggestion</a>
+  </div>
 </div>
 
 <script src="./ocr/tesseract.min.js"></script>
@@ -3526,7 +3555,7 @@ async function applySignaturesToAllPages(fileBytes, {
     bResultsPanel.innerHTML = '<div class="panel-title">Calculated Results</div>';
     const rows = [
       ['Total Shift Hours', hrs(r.shiftHours)],
-      ['Breakdown Hours', r.allDay ? 'All day' : hrs(r.breakHours)],
+      ['Breakdown Hours', r.allDay ? 'Entire shift' : hrs(r.breakHours)],
       ['Equipment Hourly Rate', money(r.eqHourlyRate)],
       ['Equipment Deduction', money(r.eqDeduction) + (r.allDay ? ' (full daily rate)' : '')],
       ['Transport Hourly Rate', money(r.transportHourlyRate)],
@@ -3695,8 +3724,8 @@ async function applySignaturesToAllPages(fileBytes, {
     y -= 20;
     fieldRow('Shift Start - End:', `${bShiftStart.value} - ${bShiftEnd.value}  (military)`);
     fieldRow('Total Shift Hours:', hrs(r.shiftHours).replace('&mdash;', '—'));
-    fieldRow('Breakdown Start - End:', r.allDay ? 'All Day' : `${bBreakStart.value} - ${bBreakEnd.value}  (military)`);
-    fieldRow('Breakdown Hours:', r.allDay ? 'All day' : hrs(r.breakHours).replace('&mdash;', '—'));
+    fieldRow('Breakdown Start - End:', r.allDay ? 'Entire Shift' : `${bBreakStart.value} - ${bBreakEnd.value}  (military)`);
+    fieldRow('Breakdown Hours:', r.allDay ? 'Entire shift' : hrs(r.breakHours).replace('&mdash;', '—'));
 
     y -= 6;
     page.drawText('Cost & Deduction Calculation', { x: 50, y, size: 11.5, font: boldFont });
@@ -3706,7 +3735,7 @@ async function applySignaturesToAllPages(fileBytes, {
       note: `(${money(r.dailyPrice)} ÷ ${hrs(r.shiftHours)})`,
     });
     fieldRow('Equipment Deduction:', money(r.eqDeduction).replace('&mdash;', '—'), {
-      note: r.allDay ? '(Full daily rate — all day breakdown)' : `(${money(r.eqHourlyRate)} × ${hrs(r.breakHours)})`,
+      note: r.allDay ? '(Full daily rate — entire shift breakdown)' : `(${money(r.eqHourlyRate)} × ${hrs(r.breakHours)})`,
     });
     if (r.dailyTransport !== null) {
       fieldRow('Daily Transport Cost:', money(r.dailyTransport).replace('&mdash;', '—'));
@@ -3714,7 +3743,7 @@ async function applySignaturesToAllPages(fileBytes, {
         note: `(${money(r.dailyTransport)} ÷ ${hrs(r.shiftHours)})`,
       });
       fieldRow('Transport Deduction:', money(r.transportDeduction).replace('&mdash;', '—'), {
-        note: r.allDay ? '(Full daily rate — all day breakdown)' : `(${money(r.transportHourlyRate)} × ${hrs(r.breakHours)})`,
+        note: r.allDay ? '(Full daily rate — entire shift breakdown)' : `(${money(r.transportHourlyRate)} × ${hrs(r.breakHours)})`,
       });
     }
 
