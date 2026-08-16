@@ -1082,7 +1082,7 @@
   </div>
 
   <p class="beta-note">&#9888;&#65039; OCR (used for reading scanned Agreements, Resource Orders, and OF-286s) is currently in beta testing and can be unreliable, especially on handwriting and low-quality scans. Freshly downloaded, unscanned documents straight from VIPR, IROC, and e-iSuite are still preferred whenever you have them &mdash; use OCR results as a starting point to verify, not a final answer.</p>
-  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.18</p>
+  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.19</p>
   <div class="suggestion-wrap">
     <a class="suggestion-link" href="https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=urWTBhhLe02TQfMvQApUlLMtrc2YmxRJib_E55WLqt5UOTdBTFhSV09MVDVFOFpJODJISDlHUEhSMy4u" target="_blank" rel="noopener">Submit a Suggestion</a>
   </div>
@@ -6396,6 +6396,7 @@ async function applySignaturesToAllPages(fileBytes, {
   const ctrgenPreviewSummary = document.getElementById('ctrgenPreviewSummary');
   const ctrgenPreviewTable = document.getElementById('ctrgenPreviewTable');
   const ctrgenPreviewBody = document.getElementById('ctrgenPreviewBody');
+  const ctrgenResultsPanel = document.getElementById('ctrgenResultsPanel');
   const ctrgenOutputsList = document.getElementById('ctrgenOutputsList');
   const ctrgenPdfPreview = document.getElementById('ctrgenPdfPreview');
   const ctrgenPrevBtn = document.getElementById('ctrgenPrevBtn');
@@ -6411,7 +6412,12 @@ async function applySignaturesToAllPages(fileBytes, {
   let ctrgenPreviewBlobUrls = []; // tracked so we can revoke them when rebuilding the preview
 
   function ctrgenShowStatus(kind, msg) {
-    ctrgenStatusEl.className = 'status ' + (kind || '');
+    if (!kind && !msg) {
+      ctrgenStatusEl.className = 'status';
+      ctrgenStatusEl.innerHTML = '';
+      return;
+    }
+    ctrgenStatusEl.className = 'status show ' + (kind || '');
     ctrgenStatusEl.innerHTML = msg || '';
   }
 
@@ -6468,6 +6474,7 @@ async function applySignaturesToAllPages(fileBytes, {
     ctrgenParseBtn.disabled = false;
     ctrgenGenerateBtn.disabled = true;
     ctrgenRoster = [];
+    ctrgenResultsPanel.classList.remove('show');
     ctrgenPreviewTable.style.display = 'none';
     ctrgenPreviewBody.innerHTML = '';
     ctrgenPreviewSummary.innerHTML = '';
@@ -6484,6 +6491,7 @@ async function applySignaturesToAllPages(fileBytes, {
     ctrgenHint.textContent = 'Click to choose a file, or drag one here';
     ctrgenParseBtn.disabled = true;
     ctrgenGenerateBtn.disabled = true;
+    ctrgenResultsPanel.classList.remove('show');
     ctrgenPreviewTable.style.display = 'none';
     ctrgenPreviewBody.innerHTML = '';
     ctrgenPreviewSummary.innerHTML = '';
@@ -6740,10 +6748,13 @@ async function applySignaturesToAllPages(fileBytes, {
             previewOutputs.push(await ctrgenFillOne(row));
             console.log(`CTR Generator: preview for "${row.name}" done.`);
           }
+          console.log(`CTR Generator: preview loop finished with ${previewOutputs.length} output(s). Calling ctrgenShowPreviewAt(0)\u2026`);
           ctrgenPreviewOutputs = previewOutputs;
           ctrgenPreviewIndex = 0;
           ctrgenShowPreviewAt(0);
+          console.log('CTR Generator: ctrgenShowPreviewAt(0) returned. Preview panel display style is now:', ctrgenPdfPreview.style.display);
           ctrgenShowStatus('success', `Found ${roster.length} row(s), ${okCount} ready to generate. Preview below \u2014 use Prev/Next to check each person, then click Generate CTRs to download.`);
+          console.log('CTR Generator: status shown. ctrgenStatusEl.textContent is now:', JSON.stringify(ctrgenStatusEl.textContent));
         } catch (err) {
           console.error('CTR preview build error:', err);
           ctrgenShowStatus('error', `Found ${roster.length} row(s), ${okCount} ready to generate, but the preview couldn't be built: ${errMsg(err)}. You can still try Generate CTRs.`);
@@ -6759,6 +6770,7 @@ async function applySignaturesToAllPages(fileBytes, {
 
   function ctrgenRenderPreview() {
     ctrgenPreviewBody.innerHTML = '';
+    ctrgenResultsPanel.classList.toggle('show', ctrgenRoster.length > 0);
     if (!ctrgenRoster.length) {
       ctrgenPreviewTable.style.display = 'none';
       ctrgenPreviewSummary.innerHTML = '';
@@ -6898,7 +6910,9 @@ async function applySignaturesToAllPages(fileBytes, {
           failures.push(`${row.name}: ${errMsg(err)}`);
         }
       }
+      console.log(`CTR Generator: loop finished -- ${outputs.length} succeeded, ${failures.length} failed. Rendering outputs now\u2026`);
       ctrgenRenderOutputs(outputs);
+      console.log('CTR Generator: ctrgenRenderOutputs() returned. Outputs list child count:', ctrgenOutputsList.children.length);
       if (failures.length) {
         ctrgenShowStatus('error', `Generated ${outputs.length} of ${validRows.length}. Failed: ${failures.join('; ')}`);
       } else if (!outputs.length) {
@@ -6906,6 +6920,7 @@ async function applySignaturesToAllPages(fileBytes, {
       } else {
         ctrgenShowStatus('success', `Generated ${outputs.length} CTR${outputs.length === 1 ? '' : 's'}. Download below, or grab them all as a zip.`);
       }
+      console.log('CTR Generator: status shown. ctrgenStatusEl.textContent is now:', JSON.stringify(ctrgenStatusEl.textContent));
     } catch (err) {
       // Belt-and-suspenders: catches anything unexpected outside the
       // per-row loop (e.g. a rendering error) so the button never gets
