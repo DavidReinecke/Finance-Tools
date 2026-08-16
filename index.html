@@ -1072,7 +1072,7 @@
   </div>
 
   <p class="beta-note">&#9888;&#65039; OCR (used for reading scanned Agreements, Resource Orders, and OF-286s) is currently in beta testing and can be unreliable, especially on handwriting and low-quality scans. Freshly downloaded, unscanned documents straight from VIPR, IROC, and e-iSuite are still preferred whenever you have them &mdash; use OCR results as a starting point to verify, not a final answer.</p>
-  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.12</p>
+  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.13</p>
   <div class="suggestion-wrap">
     <a class="suggestion-link" href="https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=urWTBhhLe02TQfMvQApUlLMtrc2YmxRJib_E55WLqt5UOTdBTFhSV09MVDVFOFpJODJISDlHUEhSMy4u" target="_blank" rel="noopener">Submit a Suggestion</a>
   </div>
@@ -6634,13 +6634,16 @@ async function applySignaturesToAllPages(fileBytes, {
             }
           }
         }
-        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-          errors.push('email address looks invalid');
-        }
+        // Email is only used for the optional "Email this CTR" convenience
+        // link, so a bad/placeholder address (e.g. "xxx") shouldn't block
+        // generating the CTR itself -- just skip that link for this row.
+        const emailValid = !email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+        const emailWarning = !emailValid ? 'email address looks invalid \u2014 no "Email this CTR" link will be shown' : null;
 
         roster.push({
-          rowNum, name, roNumber, classification, email, firstDay, lastDay, on1, off1, on2, off2, dates,
+          rowNum, name, roNumber, classification, email: emailValid ? email : '', firstDay, lastDay, on1, off1, on2, off2, dates,
           error: errors.length ? errors.join('; ') : null,
+          warning: emailWarning,
         });
       }
 
@@ -6677,7 +6680,9 @@ async function applySignaturesToAllPages(fileBytes, {
       const dateRange = (r.firstDay && r.lastDay) ? `${ctrgenFmtDateMMDD(r.firstDay)}\u2013${ctrgenFmtDateMMDD(r.lastDay)}` : '\u2014';
       const statusHtml = r.error
         ? `<span style="color:#b00020;">${r.error}</span>`
-        : '<span style="color:#0a7a2a;">OK</span>';
+        : r.warning
+          ? `<span style="color:#b07a00;">OK \u2014 ${r.warning}</span>`
+          : '<span style="color:#0a7a2a;">OK</span>';
       tr.innerHTML = `
         <td style="padding:6px 8px; border-bottom:1px solid var(--line,#eee);">${(r.name || '').replace(/</g, '&lt;')}</td>
         <td style="padding:6px 8px; border-bottom:1px solid var(--line,#eee);">${(r.roNumber || '').replace(/</g, '&lt;')}</td>
