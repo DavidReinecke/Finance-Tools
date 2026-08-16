@@ -1081,7 +1081,7 @@
   </div>
 
   <p class="beta-note">&#9888;&#65039; OCR (used for reading scanned Agreements, Resource Orders, and OF-286s) is currently in beta testing and can be unreliable, especially on handwriting and low-quality scans. Freshly downloaded, unscanned documents straight from VIPR, IROC, and e-iSuite are still preferred whenever you have them &mdash; use OCR results as a starting point to verify, not a final answer.</p>
-  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.14</p>
+  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.15</p>
   <div class="suggestion-wrap">
     <a class="suggestion-link" href="https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=urWTBhhLe02TQfMvQApUlLMtrc2YmxRJib_E55WLqt5UOTdBTFhSV09MVDVFOFpJODJISDlHUEhSMy4u" target="_blank" rel="noopener">Submit a Suggestion</a>
   </div>
@@ -6322,7 +6322,12 @@ async function applySignaturesToAllPages(fileBytes, {
 </script>
 <script>
 (() => {
+ try {
   const { PDFDocument, StandardFonts, PDFName, PDFBool } = PDFLib;
+  if (typeof JSZip === 'undefined') throw new Error('JSZip did not load (a required library for this tool is missing).');
+  if (typeof PDFDocument === 'undefined' || typeof PDFName === 'undefined' || typeof PDFBool === 'undefined') {
+    throw new Error('pdf-lib did not load correctly (a required library for this tool is missing or an older version).');
+  }
 
   // ===================== CIMT CTR Generator (Beta) =====================
   // Self-contained fillable "Individual CTR" PDF template (adapted from the
@@ -6487,8 +6492,16 @@ async function applySignaturesToAllPages(fileBytes, {
   }
 
   async function ctrgenParseXlsxFile(file) {
+    if (!/\.xlsx$/i.test(file.name)) {
+      throw new Error(`"${file.name}" doesn't look like an .xlsx file (Excel sometimes saves as .xls or .csv by mistake -- re-save it as .xlsx and try again).`);
+    }
     const arrayBuffer = await file.arrayBuffer();
-    const zip = await JSZip.loadAsync(arrayBuffer);
+    let zip;
+    try {
+      zip = await JSZip.loadAsync(arrayBuffer);
+    } catch (err) {
+      throw new Error(`Could not open "${file.name}" as an Excel file -- it may be corrupted, password-protected, or not actually an .xlsx file. (${errMsg(err)})`);
+    }
     let sharedStrings = [];
     const ssFile = zip.file('xl/sharedStrings.xml');
     if (ssFile) {
@@ -6498,7 +6511,9 @@ async function applySignaturesToAllPages(fileBytes, {
         Array.from(si.getElementsByTagName('t')).map(t => t.textContent).join('')
       );
     }
-    const wbXml = await zip.file('xl/workbook.xml').async('string');
+    const wbFile = zip.file('xl/workbook.xml');
+    if (!wbFile) throw new Error(`"${file.name}" doesn't look like a valid Excel workbook (missing xl/workbook.xml inside it).`);
+    const wbXml = await wbFile.async('string');
     const wbDoc = new DOMParser().parseFromString(wbXml, 'application/xml');
     const firstSheetEl = wbDoc.getElementsByTagName('sheet')[0];
     if (!firstSheetEl) throw new Error('No worksheet found in this file.');
@@ -6625,6 +6640,22 @@ async function applySignaturesToAllPages(fileBytes, {
     ctrgenShowStatus('', 'Reading the spreadsheet\u2026');
     try {
       const rawRows = await ctrgenParseXlsxFile(ctrgenSelectedFile);
+      if (!rawRows.length) {
+        throw new Error('The spreadsheet appears to be empty -- no rows were found at all. Make sure you uploaded the right file and that it has data starting in row 1.');
+      }
+      const expectedHeaders = ['Team Member Name', 'Resource Order Number', 'Classification', 'Email Address', 'First Work Day', 'Last Work Day', 'Standard Work Shift Start (HHMM)', 'Standard Work Shift Stop (HHMM)', 'Lunch Time (HHMM)'];
+      const actualHeaders = (rawRows[0] || []).map(h => (h || '').toString().trim());
+      const headerProblems = [];
+      expectedHeaders.forEach((expected, i) => {
+        const actual = actualHeaders[i] || '(missing)';
+        if (actual !== expected) headerProblems.push(`column ${String.fromCharCode(65 + i)}: expected "${expected}", found "${actual}"`);
+      });
+      if (headerProblems.length) {
+        console.warn('CTR roster header mismatch:', headerProblems);
+        ctrgenShowStatus('error', `This doesn't match the expected roster template layout, so the columns may be read wrong. Re-download the template from the button above and copy your data into it, or fix: ${headerProblems.join('; ')}.`);
+        ctrgenParseBtn.disabled = false;
+        return;
+      }
       const dataRows = rawRows.slice(1); // skip header row
       const roster = [];
       let rowNum = 1; // spreadsheet row number, header is row 1
@@ -6875,6 +6906,20 @@ async function applySignaturesToAllPages(fileBytes, {
     }
     appendDownloadAllButton(ctrgenOutputsList, outputs, 'CIMT_CTRs.zip');
   }
+ } catch (startupErr) {
+  // If anything above throws, none of the click handlers ever get attached,
+  // which is exactly what makes every button in this tab silently "do
+  // nothing." Surface the real reason instead of failing invisibly.
+  console.error('CIMT CTR Generator failed to initialize:', startupErr);
+  const panel = document.getElementById('ctrgenTabPanel');
+  if (panel) {
+    const banner = document.createElement('div');
+    banner.className = 'status error';
+    banner.style.margin = '12px';
+    banner.textContent = 'The CIMT CTR Generator failed to start up: ' + (startupErr && startupErr.message ? startupErr.message : String(startupErr)) + '. Try reloading this page (a fresh copy of the tool file). If it keeps happening, open your browser\'s DevTools console (F12) and share the red error text.';
+    panel.prepend(banner);
+  }
+ }
 })();
 </script>
 </body>
