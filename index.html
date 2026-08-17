@@ -1054,7 +1054,7 @@
       <button id="ctrgenGenerateBtn" type="button" disabled>Generate CTRs</button>
       <button id="ctrgenClearBtn" class="secondary" type="button">Clear</button>
       <div style="font-size:12px; color:var(--muted,#666); margin-top:4px;">
-        Fill in the incident info above (applied to every CTR), then download the template, fill one row per person, and upload it back. The template is a proper Excel table: First/Last Work Day are real date columns (click and pick a date, or type one), and Classification is a dropdown limited to FED, AD, or EFF/COOP. Each row becomes one CTR covering every day from First Work Day through Last Work Day (max 22 days &mdash; longer spans need to be split into two rows/forms). Times are 24-hour, e.g. 0600. Lunch Time is when lunch starts &mdash; a standard 30-minute unpaid lunch is assumed, so lunch end is calculated automatically.
+        Fill in the incident info above (applied to every CTR), then download the template, fill one row per person, and upload it back. The template is a proper Excel table: First/Last Work Day are real date columns (click and pick a date, or type one), and Classification is a dropdown limited to FED, AD, or EFF/COOP. Each row becomes one CTR covering every day from First Work Day through Last Work Day (max 22 days &mdash; longer spans need to be split into two rows/forms). Times are 24-hour, e.g. 0600. Lunch Time is when lunch starts &mdash; a standard 30-minute unpaid lunch is assumed, so lunch end is calculated automatically. If someone isn't taking a lunch, just leave Lunch Time blank and the whole shift is entered as straight time. Any shift that totals over 16 hours (lunch excluded) is flagged so you can double-check it. Rows with a name filled in but no dates and/or times yet (e.g. right after importing a team roster) are skipped quietly rather than shown as errors &mdash; fill those in and re-run "Preview Roster" once their dates/times are known.
       </div>
       <div class="status" id="ctrgenStatus"></div>
     </div>
@@ -1090,7 +1090,7 @@
   </div>
 
   <p class="beta-note">&#9888;&#65039; OCR (used for reading scanned Agreements, Resource Orders, and OF-286s) is currently in beta testing and can be unreliable, especially on handwriting and low-quality scans. Freshly downloaded, unscanned documents straight from VIPR, IROC, and e-iSuite are still preferred whenever you have them &mdash; use OCR results as a starting point to verify, not a final answer.</p>
-  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.28</p>
+  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.30</p>
   <div class="suggestion-wrap">
     <a class="suggestion-link" href="https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=urWTBhhLe02TQfMvQApUlLMtrc2YmxRJib_E55WLqt5UOTdBTFhSV09MVDVFOFpJODJISDlHUEhSMy4u" target="_blank" rel="noopener">Submit a Suggestion</a>
   </div>
@@ -6621,6 +6621,14 @@ async function applySignaturesToAllPages(fileBytes, {
     return outH + outM;
   }
 
+  function ctrgenHHMMToMinutes(hhmm) {
+    if (!hhmm || hhmm.length !== 4) return null;
+    const h = parseInt(hhmm.slice(0, 2), 10);
+    const m = parseInt(hhmm.slice(2, 4), 10);
+    if (isNaN(h) || isNaN(m)) return null;
+    return h * 60 + m;
+  }
+
 
   // ---- DOM refs ----
   const ctrgenOffice = document.getElementById('ctrgenOffice');
@@ -6921,11 +6929,17 @@ async function applySignaturesToAllPages(fileBytes, {
       }
       const dataRows = rawRows.slice(1); // skip header row
       const roster = [];
+      let skippedIncomplete = 0;
       let rowNum = 1; // spreadsheet row number, header is row 1
       for (const cells of dataRows) {
         rowNum++;
+        // Skip rows with no real content at all (e.g. leftover blank rows
+        // in a large roster) as well as rows where just the name is blank
+        // -- neither is something to flag as an error, just nothing to do.
+        const rowIsBlank = !cells || cells.every((c) => !(c || '').toString().trim());
+        if (rowIsBlank) continue;
         const name = (cells[0] || '').toString().trim();
-        if (!name) continue; // skip fully blank rows
+        if (!name) continue;
         if (/^\(EXAMPLE/i.test(name)) continue; // skip the sample row
         const roNumber = (cells[1] || '').toString().trim();
         const classification = (cells[2] || '').toString().trim();
@@ -6933,32 +6947,62 @@ async function applySignaturesToAllPages(fileBytes, {
         const firstDay = ctrgenParseDateCell(cells[4]);
         const lastDay = ctrgenParseDateCell(cells[5]);
         const on1 = ctrgenParseTimeToHHMM(cells[6]); // shift start
-        const off2 = ctrgenParseTimeToHHMM(cells[7]); // shift stop
-        const off1 = ctrgenParseTimeToHHMM(cells[8]); // lunch start
-        // Lunch end = lunch start + a standard 30-minute unpaid lunch.
-        const on2 = off1 ? ctrgenAddMinutesToHHMM(off1, CTRGEN_LUNCH_MINUTES) : null;
+        const shiftStop = ctrgenParseTimeToHHMM(cells[7]); // shift stop
+        const lunchStart = ctrgenParseTimeToHHMM(cells[8]); // lunch start (optional)
+
+        // A roster commonly has everyone's name/RO/classification filled
+        // in well before their actual work dates and shift times are
+        // known (e.g. right after the Folder Generator's team export).
+        // Someone who hasn't gotten dates and/or times entered yet isn't
+        // ready to be included in this run -- skip them silently rather
+        // than flagging it as an error to fix.
+        if (!firstDay || !lastDay || !on1 || !shiftStop) { skippedIncomplete++; continue; }
+
+        // Lunch is optional -- some people aren't required to take one.
+        // If a lunch start time is given, split the day into a before/
+        // after lunch block (lunch end = lunch start + the standard
+        // unpaid lunch length). If not, it's straight time: one
+        // continuous block filled into the "before lunch" ON/OFF columns,
+        // with "after lunch" left blank.
+        let off1, on2, off2;
+        if (lunchStart) {
+          off1 = lunchStart;
+          on2 = ctrgenAddMinutesToHHMM(lunchStart, CTRGEN_LUNCH_MINUTES);
+          off2 = shiftStop;
+        } else {
+          off1 = shiftStop;
+          on2 = null;
+          off2 = null;
+        }
 
         const errors = [];
         if (!roNumber) errors.push('missing Resource Order Number');
         if (!classification) errors.push('missing classification');
-        if (!firstDay) errors.push('invalid/missing First Work Day');
-        if (!lastDay) errors.push('invalid/missing Last Work Day');
-        if (!on1) errors.push('invalid/missing Shift Start');
-        if (!off2) errors.push('invalid/missing Shift Stop');
-        if (!off1) errors.push('invalid/missing Lunch Time');
+
+        // Total time on shift, lunch (if any) excluded -- shifts that
+        // cross midnight wrap around rather than going negative.
+        const startMin = ctrgenHHMMToMinutes(on1);
+        const stopMin = ctrgenHHMMToMinutes(shiftStop);
+        if (startMin !== null && stopMin !== null) {
+          let span = stopMin - startMin;
+          if (span <= 0) span += 24 * 60;
+          const workedMinutes = span - (lunchStart ? CTRGEN_LUNCH_MINUTES : 0);
+          if (workedMinutes > 16 * 60) {
+            errors.push(`shift totals ${(workedMinutes / 60).toFixed(1)} hours, over the 16-hour daily limit \u2014 double-check the shift start/stop and lunch time`);
+          }
+        }
 
         let dates = [];
-        if (firstDay && lastDay) {
-          if (lastDay < firstDay) {
-            errors.push('Last Work Day is before First Work Day');
-          } else {
-            dates = ctrgenDateRangeInclusive(firstDay, lastDay);
-            if (dates.length > CTRGEN_MAX_ROWS) {
-              errors.push(`spans ${dates.length} days, over the ${CTRGEN_MAX_ROWS}-day limit \u2014 split into two rows`);
-            }
+        if (lastDay < firstDay) {
+          errors.push('Last Work Day is before First Work Day');
+        } else {
+          dates = ctrgenDateRangeInclusive(firstDay, lastDay);
+          if (dates.length > CTRGEN_MAX_ROWS) {
+            errors.push(`spans ${dates.length} days, over the ${CTRGEN_MAX_ROWS}-day limit \u2014 split into two rows`);
           }
         }
         roster.push({
+
           rowNum, name, roNumber, classification, email, firstDay, lastDay, on1, off1, on2, off2, dates,
           error: errors.length ? errors.join('; ') : null,
         });
@@ -6967,14 +7011,19 @@ async function applySignaturesToAllPages(fileBytes, {
       ctrgenRoster = roster;
       ctrgenRenderPreview();
       const okCount = roster.filter(r => !r.error).length;
+      const skippedNote = skippedIncomplete > 0 ? ` (${skippedIncomplete} row(s) skipped -- no dates and/or times entered yet.)` : '';
       ctrgenClosePreview();
       if (!roster.length) {
-        ctrgenShowStatus('error', 'No employee rows found. Make sure you filled in the template starting at row 2 and removed the example row (or left it \u2014 it\'s skipped automatically).');
+        if (skippedIncomplete > 0) {
+          ctrgenShowStatus('error', `Found ${skippedIncomplete} row(s), but none have dates and times entered yet -- nothing to generate. Fill in First/Last Work Day and shift times for at least one person, then try again.`);
+        } else {
+          ctrgenShowStatus('error', 'No employee rows found. Make sure you filled in the template starting at row 2 and removed the example row (or left it \u2014 it\'s skipped automatically).');
+        }
       } else if (okCount === 0) {
-        ctrgenShowStatus('error', `Found ${roster.length} row(s), but all of them have errors \u2014 see the Status column below.`);
+        ctrgenShowStatus('error', `Found ${roster.length} row(s), but all of them have errors \u2014 see the Status column below.${skippedNote}`);
       } else {
         ctrgenGenerateBtn.disabled = false;
-        ctrgenShowStatus('', `Found ${roster.length} row(s), ${okCount} ready to generate. Building preview\u2026`);
+        ctrgenShowStatus('', `Found ${roster.length} row(s), ${okCount} ready to generate.${skippedNote} Building preview\u2026`);
         try {
           const validRows = roster.filter(r => !r.error);
           const previewOutputs = [];
@@ -6988,7 +7037,7 @@ async function applySignaturesToAllPages(fileBytes, {
           ctrgenPreviewIndex = 0;
           ctrgenShowPreviewAt(0);
           console.log('CTR Generator: ctrgenShowPreviewAt(0) returned. Preview panel display style is now:', ctrgenPdfPreview.style.display);
-          ctrgenShowStatus('success', `Found ${roster.length} row(s), ${okCount} ready to generate. Preview below \u2014 use Prev/Next to check each person, then click Generate CTRs to download.`);
+          ctrgenShowStatus('success', `Found ${roster.length} row(s), ${okCount} ready to generate.${skippedNote} Preview below \u2014 use Prev/Next to check each person, then click Generate CTRs to download.`);
           console.log('CTR Generator: status shown. ctrgenStatusEl.textContent is now:', JSON.stringify(ctrgenStatusEl.textContent));
         } catch (err) {
           console.error('CTR preview build error:', err);
