@@ -690,6 +690,7 @@
     <button class="tab-btn" data-tab="sigprep" type="button">Invoice Signature</button>
     <button class="tab-btn" data-tab="folders" type="button">Folder Generator</button>
     <button class="tab-btn" data-tab="ctrgen" type="button">CIMT CTR Generator (Beta)</button>
+    <button class="tab-btn" data-tab="ctrind" type="button">Individual CTR Generator</button>
   </div>
 </div>
 
@@ -1093,8 +1094,75 @@
   </div>
   </div>
 
+  <div class="tab-panel" id="ctrindTabPanel">
+  <div class="layout">
+    <div class="card">
+      <div class="field">
+        <label>Office Responsible for Fire</label>
+        <input type="text" id="ctrindOffice" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--line, #ccc);">
+      </div>
+      <div class="field">
+        <label>Fire Name</label>
+        <input type="text" id="ctrindFireName" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--line, #ccc);">
+      </div>
+      <div class="field">
+        <label>Fire Number</label>
+        <input type="text" id="ctrindFireNumber" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--line, #ccc);">
+      </div>
+      <div class="field">
+        <label>Employee Name</label>
+        <input type="text" id="ctrindName" placeholder="Last, First" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--line, #ccc);">
+      </div>
+      <div class="field">
+        <label>Resource Order Number</label>
+        <input type="text" id="ctrindRoNumber" placeholder="O-14" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--line, #ccc);">
+      </div>
+      <div class="field">
+        <label>Classification</label>
+        <select id="ctrindClassification" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--line, #ccc);">
+          <option value="">Select\u2026</option>
+          <option value="FED">FED</option>
+          <option value="AD">AD</option>
+          <option value="EFF/COOP">EFF/COOP</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>First Work Day</label>
+        <input type="date" id="ctrindFirstDay" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--line, #ccc);">
+      </div>
+      <div class="field">
+        <label>Last Work Day</label>
+        <input type="date" id="ctrindLastDay" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--line, #ccc);">
+      </div>
+      <div class="field">
+        <label>Standard Work Shift Start (HHMM, 24-hour)</label>
+        <input type="text" id="ctrindShiftStart" placeholder="0600" maxlength="4" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--line, #ccc);">
+      </div>
+      <div class="field">
+        <label>Standard Work Shift Stop (HHMM, 24-hour)</label>
+        <input type="text" id="ctrindShiftStop" placeholder="1800" maxlength="4" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--line, #ccc);">
+      </div>
+      <div class="field">
+        <label>Lunch Time (HHMM, optional \u2014 leave blank for straight time)</label>
+        <input type="text" id="ctrindLunch" placeholder="1200" maxlength="4" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--line, #ccc);">
+      </div>
+      <button id="ctrindGenerateBtn" type="button">Generate My CTR</button>
+      <button id="ctrindClearBtn" class="secondary" type="button">Clear</button>
+      <div style="font-size:12px; color:var(--muted,#666); margin-top:4px;">
+        For filling out your own Individual Crew Time Report by hand, without a roster spreadsheet. Covers every day from First Work Day through Last Work Day automatically (max 22 days per form \u2014 longer assignments need a second CTR). Times are 24-hour, e.g. 0600. Leave Lunch Time blank if you're not required to take one \u2014 the whole shift is entered as straight time instead. Shifts over 16 hours (lunch excluded) are blocked so you can double-check the times before generating.
+      </div>
+      <div class="status" id="ctrindStatus"></div>
+    </div>
+    <div class="fields-panel" id="ctrindResultsPanel">
+      <div class="panel-title">CTR Preview</div>
+      <iframe id="ctrindPdfFrame" title="CTR preview" style="width:100%; height:520px; border:1px solid var(--line,#ccc); border-radius:6px; background:#fff; display:none;"></iframe>
+      <button id="ctrindDownloadBtn" class="secondary" type="button" style="display:none; margin-top:10px;">Download CTR (.pdf)</button>
+    </div>
+  </div>
+  </div>
+
   <p class="beta-note">&#9888;&#65039; OCR (used for reading scanned Agreements, Resource Orders, and OF-286s) is currently in beta testing and can be unreliable, especially on handwriting and low-quality scans. Freshly downloaded, unscanned documents straight from VIPR, IROC, and e-iSuite are still preferred whenever you have them &mdash; use OCR results as a starting point to verify, not a final answer.</p>
-  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.31</p>
+  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.32</p>
   <div class="suggestion-wrap">
     <a class="suggestion-link" href="https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=urWTBhhLe02TQfMvQApUlLMtrc2YmxRJib_E55WLqt5UOTdBTFhSV09MVDVFOFpJODJISDlHUEhSMy4u" target="_blank" rel="noopener">Submit a Suggestion</a>
   </div>
@@ -3321,7 +3389,7 @@ async function applySignaturesToAllPages(fileBytes, {
 </script>
 <script>
   const tabBtns = document.querySelectorAll('.tab-btn');
-  const tabPanels = { clin: document.getElementById('clinTabPanel'), breakdown: document.getElementById('breakdownTabPanel'), imgpdf: document.getElementById('imgpdfTabPanel'), audit: document.getElementById('auditTabPanel'), sigprep: document.getElementById('sigprepTabPanel'), folders: document.getElementById('foldersTabPanel'), ctrgen: document.getElementById('ctrgenTabPanel') };
+  const tabPanels = { clin: document.getElementById('clinTabPanel'), breakdown: document.getElementById('breakdownTabPanel'), imgpdf: document.getElementById('imgpdfTabPanel'), audit: document.getElementById('auditTabPanel'), sigprep: document.getElementById('sigprepTabPanel'), folders: document.getElementById('foldersTabPanel'), ctrgen: document.getElementById('ctrgenTabPanel'), ctrind: document.getElementById('ctrindTabPanel') };
   const pageHeader = document.getElementById('pageHeader');
   const pageSub = document.getElementById('pageSub');
   const ORG_PREFIX = 'Northern Rockies GA';
@@ -3333,6 +3401,7 @@ async function applySignaturesToAllPages(fileBytes, {
     sigprep: 'Invoice Signature',
     folders: 'Folder Generator',
     ctrgen: 'CIMT CTR Generator (Beta)',
+    ctrind: 'Individual CTR Generator',
   };
   const tabDescription = {
     clin: "Upload a Forest Service VIPR equipment rental agreement and a CLIN number. Get back a 3-page PDF (cover page, vendor info, and that CLIN's equipment record) with the key fields highlighted, plus copyable values for pasting elsewhere. Runs entirely in your browser — nothing is uploaded anywhere.",
@@ -3342,6 +3411,7 @@ async function applySignaturesToAllPages(fileBytes, {
     sigprep: 'Upload a final invoice PDF, then have the contractor and the government reviewer sign right in this app — draw a signature and type a name/title, no Adobe or separate device needed. Every page that needs a signature gets one, automatically placed on the invoice’s signature block or, if a page (like a Deductions and Additions attachment) has no defined spot, near the bottom out of the way. The date is stamped in automatically. Works on phones and tablets. The signed PDF can’t be downloaded until both parties have signed.',
     folders: 'Upload an IROC incident export (XML) to generate standardized folder names for every equipment agreement, contract crew, and contract overhead resource on the incident. Optionally upload a list of folders that already exist (or point it at a locally-synced OneDrive folder) so it skips anything already created. Preview the names, create the subfolders directly, or download a plain folder list and a spreadsheet of new contract numbers to track down CLINs for.',
     ctrgen: 'Download a roster template, fill in one row per team member (Resource Order Number, classification, email, first/last work day, and standard shift/lunch times), and upload it back to generate a pre-filled Individual Crew Time Report for each person &mdash; covering every day of their assignment automatically. Beta: built for standard continuous shifts on a single incident; double-check the output before it goes to signature.',
+    ctrind: 'Fill in your own name, Resource Order Number, classification, incident info, work dates, and shift times directly on screen to generate a single Individual Crew Time Report for yourself &mdash; no spreadsheet needed.',
   };
   tabBtns.forEach(btn => {
     btn.addEventListener('click', () => {
@@ -7126,7 +7196,10 @@ async function applySignaturesToAllPages(fileBytes, {
     ]);
   }
 
-  async function ctrgenFillOne(row) {
+  async function ctrgenFillOne(row, meta) {
+    const office = (meta && meta.office !== undefined) ? meta.office : ctrgenOffice.value.trim();
+    const fireName = (meta && meta.fireName !== undefined) ? meta.fireName : ctrgenFireName.value.trim();
+    const fireNumber = (meta && meta.fireNumber !== undefined) ? meta.fireNumber : ctrgenFireNumber.value.trim();
     console.log(`CTR Generator: [${row.name}] loading template PDF\u2026`);
     const pdfDoc = await ctrgenWithTimeout(PDFDocument.load(ctrgenTemplateBytes), 20000, `loading the template PDF for ${row.name}`);
     console.log(`CTR Generator: [${row.name}] template loaded, getting form\u2026`);
@@ -7137,9 +7210,9 @@ async function applySignaturesToAllPages(fileBytes, {
     };
     setIfExists('employee_name', row.name);
     setIfExists('ro_number', row.roNumber);
-    setIfExists('office_responsible', ctrgenOffice.value.trim());
-    setIfExists('fire_name', ctrgenFireName.value.trim());
-    setIfExists('fire_number', ctrgenFireNumber.value.trim());
+    setIfExists('office_responsible', office);
+    setIfExists('fire_name', fireName);
+    setIfExists('fire_number', fireNumber);
     row.dates.forEach((d, i) => {
       const n = i + 1;
       setIfExists(`classification_row${n}`, row.classification);
@@ -7163,6 +7236,167 @@ async function applySignaturesToAllPages(fileBytes, {
     const filename = `CTR_${ctrgenRoForFilename(row.roNumber)}_${ctrgenFilenameDateRange(row.firstDay, row.lastDay)}.pdf`;
     return { filename, pdfBytes: bytes, row };
   }
+
+  // ---- Individual CTR Generator (single person, filled in by hand) ----
+  const ctrindOffice = document.getElementById('ctrindOffice');
+  const ctrindFireName = document.getElementById('ctrindFireName');
+  const ctrindFireNumber = document.getElementById('ctrindFireNumber');
+  const ctrindName = document.getElementById('ctrindName');
+  const ctrindRoNumber = document.getElementById('ctrindRoNumber');
+  const ctrindClassification = document.getElementById('ctrindClassification');
+  const ctrindFirstDay = document.getElementById('ctrindFirstDay');
+  const ctrindLastDay = document.getElementById('ctrindLastDay');
+  const ctrindShiftStart = document.getElementById('ctrindShiftStart');
+  const ctrindShiftStop = document.getElementById('ctrindShiftStop');
+  const ctrindLunch = document.getElementById('ctrindLunch');
+  const ctrindGenerateBtn = document.getElementById('ctrindGenerateBtn');
+  const ctrindClearBtn = document.getElementById('ctrindClearBtn');
+  const ctrindStatusEl = document.getElementById('ctrindStatus');
+  const ctrindResultsPanel = document.getElementById('ctrindResultsPanel');
+  const ctrindPdfFrame = document.getElementById('ctrindPdfFrame');
+  const ctrindDownloadBtn = document.getElementById('ctrindDownloadBtn');
+  let ctrindCurrentOutput = null;
+  let ctrindCurrentUrl = null;
+
+  function ctrindShowStatus(kind, msg) {
+    if (!kind && !msg) {
+      ctrindStatusEl.className = 'status';
+      ctrindStatusEl.innerHTML = '';
+      return;
+    }
+    ctrindStatusEl.className = 'status show ' + (kind || '');
+    ctrindStatusEl.innerHTML = msg || '';
+  }
+
+  // Parses an HTML5 date input's "YYYY-MM-DD" value as a local-midnight
+  // Date -- avoids the classic off-by-one where `new Date('YYYY-MM-DD')`
+  // parses as UTC midnight and can display as the previous day locally.
+  function ctrindParseDateInput(value) {
+    if (!value) return null;
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (!m) return null;
+    const d = new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10));
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  ctrindGenerateBtn.addEventListener('click', async () => {
+    ctrindGenerateBtn.disabled = true;
+    ctrindResultsPanel.classList.remove('show');
+    ctrindPdfFrame.style.display = 'none';
+    ctrindDownloadBtn.style.display = 'none';
+    try {
+      const name = ctrindName.value.trim();
+      const roNumber = ctrindRoNumber.value.trim();
+      const classification = ctrindClassification.value.trim();
+      const office = ctrindOffice.value.trim();
+      const fireName = ctrindFireName.value.trim();
+      const fireNumber = ctrindFireNumber.value.trim();
+      const firstDay = ctrindParseDateInput(ctrindFirstDay.value);
+      const lastDay = ctrindParseDateInput(ctrindLastDay.value);
+      const on1 = ctrgenParseTimeToHHMM(ctrindShiftStart.value.trim());
+      const shiftStop = ctrgenParseTimeToHHMM(ctrindShiftStop.value.trim());
+      const lunchStart = ctrgenParseTimeToHHMM(ctrindLunch.value.trim());
+
+      const errors = [];
+      if (!name) errors.push('Employee Name is required');
+      if (!roNumber) errors.push('Resource Order Number is required');
+      if (!classification) errors.push('Classification is required');
+      if (!firstDay) errors.push('First Work Day is required');
+      if (!lastDay) errors.push('Last Work Day is required');
+      if (!on1) errors.push('Shift Start is required, 24-hour HHMM (e.g. 0600)');
+      if (!shiftStop) errors.push('Shift Stop is required, 24-hour HHMM (e.g. 1800)');
+      if (errors.length) {
+        ctrindShowStatus('error', errors.join('; ') + '.');
+        return;
+      }
+      if (lastDay < firstDay) {
+        ctrindShowStatus('error', 'Last Work Day is before First Work Day.');
+        return;
+      }
+      const dates = ctrgenDateRangeInclusive(firstDay, lastDay);
+      if (dates.length > CTRGEN_MAX_ROWS) {
+        ctrindShowStatus('error', `That spans ${dates.length} days, over the ${CTRGEN_MAX_ROWS}-day limit per form \u2014 split it into two CTRs.`);
+        return;
+      }
+
+      // Lunch is optional -- if not taken, the whole shift is straight
+      // time in the "before lunch" ON/OFF fields, "after lunch" left blank.
+      let off1, on2, off2;
+      if (lunchStart) {
+        off1 = lunchStart;
+        on2 = ctrgenAddMinutesToHHMM(lunchStart, CTRGEN_LUNCH_MINUTES);
+        off2 = shiftStop;
+      } else {
+        off1 = shiftStop;
+        on2 = null;
+        off2 = null;
+      }
+
+      // Total time on shift, lunch excluded -- shifts crossing midnight
+      // wrap around rather than going negative.
+      const startMin = ctrgenHHMMToMinutes(on1);
+      const stopMin = ctrgenHHMMToMinutes(shiftStop);
+      let span = stopMin - startMin;
+      if (span <= 0) span += 24 * 60;
+      const workedMinutes = span - (lunchStart ? CTRGEN_LUNCH_MINUTES : 0);
+      if (workedMinutes > 16 * 60) {
+        ctrindShowStatus('error', `That shift totals ${(workedMinutes / 60).toFixed(1)} hours, over the 16-hour daily limit \u2014 double-check the shift start/stop and lunch time before generating.`);
+        return;
+      }
+
+      const row = { name, roNumber, classification, firstDay, lastDay, dates, on1, off1, on2, off2 };
+      ctrindShowStatus('', 'Building your CTR\u2026');
+      const output = await ctrgenFillOne(row, { office, fireName, fireNumber });
+      ctrindCurrentOutput = output;
+      if (ctrindCurrentUrl) URL.revokeObjectURL(ctrindCurrentUrl);
+      const blob = new Blob([output.pdfBytes], { type: 'application/pdf' });
+      ctrindCurrentUrl = URL.createObjectURL(blob);
+      ctrindPdfFrame.src = ctrindCurrentUrl;
+      ctrindPdfFrame.style.display = '';
+      ctrindDownloadBtn.style.display = '';
+      ctrindResultsPanel.classList.add('show');
+      ctrindShowStatus('success', `CTR built for ${dates.length} day(s), ${(workedMinutes / 60).toFixed(1)}-hour shift each day. Preview on the right, or click Download.`);
+    } catch (err) {
+      console.error('Individual CTR error:', err);
+      ctrindShowStatus('error', 'Error building the CTR: ' + errMsg(err));
+    } finally {
+      ctrindGenerateBtn.disabled = false;
+    }
+  });
+
+  ctrindDownloadBtn.addEventListener('click', () => {
+    if (!ctrindCurrentOutput) return;
+    const blob = new Blob([ctrindCurrentOutput.pdfBytes], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = ctrindCurrentOutput.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+
+  ctrindClearBtn.addEventListener('click', () => {
+    ctrindOffice.value = '';
+    ctrindFireName.value = '';
+    ctrindFireNumber.value = '';
+    ctrindName.value = '';
+    ctrindRoNumber.value = '';
+    ctrindClassification.value = '';
+    ctrindFirstDay.value = '';
+    ctrindLastDay.value = '';
+    ctrindShiftStart.value = '';
+    ctrindShiftStop.value = '';
+    ctrindLunch.value = '';
+    ctrindResultsPanel.classList.remove('show');
+    ctrindPdfFrame.style.display = 'none';
+    ctrindPdfFrame.src = '';
+    ctrindDownloadBtn.style.display = 'none';
+    ctrindCurrentOutput = null;
+    if (ctrindCurrentUrl) { URL.revokeObjectURL(ctrindCurrentUrl); ctrindCurrentUrl = null; }
+    ctrindShowStatus('', '');
+  });
 
   // ---- PDF preview with Prev/Next navigation ----
   function ctrgenShowPreviewAt(idx) {
