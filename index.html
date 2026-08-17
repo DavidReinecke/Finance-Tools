@@ -1090,7 +1090,7 @@
   </div>
 
   <p class="beta-note">&#9888;&#65039; OCR (used for reading scanned Agreements, Resource Orders, and OF-286s) is currently in beta testing and can be unreliable, especially on handwriting and low-quality scans. Freshly downloaded, unscanned documents straight from VIPR, IROC, and e-iSuite are still preferred whenever you have them &mdash; use OCR results as a starting point to verify, not a final answer.</p>
-  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.27</p>
+  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.28</p>
   <div class="suggestion-wrap">
     <a class="suggestion-link" href="https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=urWTBhhLe02TQfMvQApUlLMtrc2YmxRJib_E55WLqt5UOTdBTFhSV09MVDVFOFpJODJISDlHUEhSMy4u" target="_blank" rel="noopener">Submit a Suggestion</a>
   </div>
@@ -5557,8 +5557,26 @@ async function applySignaturesToAllPages(fileBytes, {
   async function folBuildPrefilledCtrRosterBlob(members) {
     const zip = await JSZip.loadAsync(folBase64ToBytes(CTRGEN_ROSTER_TEMPLATE_B64_SHARED));
     const sheetPath = 'xl/worksheets/sheet1.xml';
+    const tablePath = 'xl/tables/table1.xml';
     let xml = await zip.file(sheetPath).async('string');
-    const capped = members.slice(0, 99); // template has pre-built date-styled rows 2-100
+    // Safety cap only -- not a realistic team-size limit, just a guard
+    // against a garbled XML somehow producing an absurd member count.
+    const capped = members.slice(0, 2000);
+    const lastRow = capped.length + 1; // header is row 1, data starts row 2
+    const templateLastRow = 101; // template ships with pre-styled rows 2-101
+
+    // If the team is bigger than the template's built-in rows, append more
+    // rows with the same date-style-only E/F cells (style index 1, same
+    // one already defined in styles.xml) that rows 3-101 use, so the new
+    // rows behave identically -- proper date columns, no visual gap.
+    if (lastRow > templateLastRow) {
+      let extra = '';
+      for (let r = templateLastRow + 1; r <= lastRow; r++) {
+        extra += `<row r="${r}"><c r="E${r}" s="1" t="n"></c><c r="F${r}" s="1" t="n"></c></row>`;
+      }
+      xml = xml.replace('</sheetData>', extra + '</sheetData>');
+    }
+
     capped.forEach((m, i) => {
       const rowNum = i + 2;
       const name = folXmlEscape(m.name || '');
@@ -5577,7 +5595,8 @@ async function applySignaturesToAllPages(fileBytes, {
       const rowMatch = xml.match(rowRegex);
       if (rowMatch) {
         // Existing row (2 = example row with full data in every column;
-        // 3-100 = pre-styled empty date cells only in E/F). Strip any
+        // 3-101 = pre-styled empty date cells only in E/F, whether from
+        // the original template or newly appended above). Strip any
         // existing A/B/C cells, and -- since only row 2 has leftover
         // example values in C/D/G/H/I plus real date values in E/F --
         // clear those too, so nobody mistakes the old example's
@@ -5597,11 +5616,24 @@ async function applySignaturesToAllPages(fileBytes, {
           .replace(/(<c r="F\d+"[^>]*)(>[\s\S]*?<\/c>|\/>)/, '$1></c>');
         xml = xml.replace(rowMatch[0], `<row r="${rowNum}">${nameCell}${roCell}${classCell}${rest}</row>`);
       } else {
-        // Shouldn't happen within the template's pre-built row range, but
-        // fall back to inserting a fresh row just in case.
+        // Shouldn't happen given the row-appending step above, but fall
+        // back to inserting a fresh row just in case.
         xml = xml.replace('</sheetData>', `<row r="${rowNum}">${nameCell}${roCell}${classCell}</row></sheetData>`);
       }
     });
+
+    // Extend the sheet dimension and Classification dropdown's range to
+    // cover any newly appended rows, and the Table's own range in its
+    // separate table1.xml part -- all three have to agree with each other
+    // or Excel will complain the file is corrupt.
+    if (lastRow > templateLastRow) {
+      xml = xml.replace(/<dimension ref="A1:I\d+"\/>/, `<dimension ref="A1:I${lastRow}"/>`);
+      xml = xml.replace(/(<dataValidation sqref="C2:C)\d+(")/, `$1${lastRow}$2`);
+      let tableXml = await zip.file(tablePath).async('string');
+      tableXml = tableXml.replace(/ref="A1:I\d+"/g, `ref="A1:I${lastRow}"`);
+      zip.file(tablePath, tableXml);
+    }
+
     zip.file(sheetPath, xml);
     return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   }
@@ -5888,19 +5920,31 @@ async function applySignaturesToAllPages(fileBytes, {
     return { prefix: match[1], number: match[2] };
   }
 
+  // Two-letter US state postal codes, as they show up in ResProvAgencyAbbrev
+  // when the providing unit is a state agency rather than a federal one
+  // (federal agency abbreviations in this field -- BLM, USFS, NPS, BIA,
+  // FWS, USDI, etc. -- are never exactly two letters, so this check does
+  // not collide with them).
+  const FOL_STATE_CODES = new Set(['AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY']);
+
   // Maps an IROC row's employment info to one of the three CTR roster
-  // Classification dropdown values (FED, AD, EFF/COOP). Checks both
-  // EmploymentClass and ResProvAgencyAbbrev, since some exports use an
-  // agency-specific code (e.g. "FSAD" for a Forest Service AD hire,
-  // "DOIAD" for a DOI AD hire) instead of a generic "Casual Hire" -- both
-  // of those, like "Casual Hire" itself, are Administratively Determined
-  // appointments and map to AD. Recognized federal appointment types
-  // (Career, Career Seasonal, Temporary, Intermittent/Call When Needed)
-  // map to FED. Anything not clearly recognized is left blank rather than
-  // guessed, since this affects pay rate and shouldn't be silently wrong.
+  // Classification dropdown values (FED, AD, EFF/COOP). State agency
+  // personnel (ResProvAgencyAbbrev is a state postal code, e.g. MT or ID)
+  // are always EFF/COOP regardless of what EmploymentClass says -- real
+  // incident data shows state-agency staff with EmploymentClass values
+  // like "Career" or "Casual Hire" that describe their status with their
+  // own state, not with the federal government, so that field alone would
+  // misclassify them as FED or AD if checked first. Everyone else is
+  // classified by EmploymentClass: Casual Hire (or the agency-specific
+  // "FSAD"/"DOIAD" AD codes) map to AD; recognized federal appointment
+  // types (Career, Career Seasonal, Temporary, Intermittent/Call When
+  // Needed) map to FED. Anything not clearly recognized is left blank
+  // rather than guessed, since this affects pay rate and shouldn't be
+  // silently wrong.
   function folClassificationForRow(row) {
     const ec = (row.EmploymentClass || '').trim().toUpperCase();
     const agency = (row.ResProvAgencyAbbrev || '').trim().toUpperCase();
+    if (FOL_STATE_CODES.has(agency)) return 'EFF/COOP';
     if (ec === 'FSAD' || ec === 'DOIAD' || agency === 'FSAD' || agency === 'DOIAD') return 'AD';
     if (ec === 'AD' || /CASUAL/.test(ec)) return 'AD';
     if (/CAREER|PERMANENT|^TEMPORARY$|INTERMITTENT/.test(ec)) return 'FED';
@@ -6419,10 +6463,8 @@ async function applySignaturesToAllPages(fileBytes, {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      const overflow = members.length - 99;
-      const capped = members.slice(0, 99);
-      const classifiedCount = capped.filter((m) => m.classification).length;
-      folShowStatus('success', `Roster built for ${capped.length} team member(s), name and Resource Order Number pre-filled, classification recognized for ${classifiedCount} of them. Fill in the rest (any blank classifications, email, dates, and shift times), then upload it in the CIMT CTR Generator tab.` + (overflow > 0 ? ` Note: ${overflow} member(s) beyond the first 99 were not included -- split into a second roster if needed.` : ''));
+      const classifiedCount = members.filter((m) => m.classification).length;
+      folShowStatus('success', `Roster built for all ${members.length} team member(s), name and Resource Order Number pre-filled, classification recognized for ${classifiedCount} of them. Fill in the rest (any blank classifications, email, dates, and shift times), then upload it in the CIMT CTR Generator tab.`);
     } catch (err) {
       console.error('CTR roster build error:', err);
       folShowStatus('error', 'Error building the CTR roster: ' + errMsg(err));
