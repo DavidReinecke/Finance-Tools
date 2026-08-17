@@ -1126,6 +1126,25 @@
           <option value="EFF/COOP">EFF/COOP</option>
         </select>
       </div>
+      <div class="field" id="ctrindAdLetterWrap" style="display:none;">
+        <label>AD Pay Plan Letter</label>
+        <select id="ctrindAdLetter" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--line, #ccc);">
+          <option value="">Select&hellip;</option>
+          <option value="A">A</option>
+          <option value="B">B</option>
+          <option value="C">C</option>
+          <option value="D">D</option>
+          <option value="E">E</option>
+          <option value="F">F</option>
+          <option value="G">G</option>
+          <option value="H">H</option>
+          <option value="I">I</option>
+          <option value="J">J</option>
+          <option value="K">K</option>
+          <option value="L">L</option>
+          <option value="M">M</option>
+        </select>
+      </div>
       <div class="field">
         <label>First Work Day</label>
         <input type="date" id="ctrindFirstDay" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--line, #ccc);">
@@ -1162,7 +1181,7 @@
   </div>
 
   <p class="beta-note">&#9888;&#65039; OCR (used for reading scanned Agreements, Resource Orders, and OF-286s) is currently in beta testing and can be unreliable, especially on handwriting and low-quality scans. Freshly downloaded, unscanned documents straight from VIPR, IROC, and e-iSuite are still preferred whenever you have them &mdash; use OCR results as a starting point to verify, not a final answer.</p>
-  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.33</p>
+  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.34</p>
   <div class="suggestion-wrap">
     <a class="suggestion-link" href="https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=urWTBhhLe02TQfMvQApUlLMtrc2YmxRJib_E55WLqt5UOTdBTFhSV09MVDVFOFpJODJISDlHUEhSMy4u" target="_blank" rel="noopener">Submit a Suggestion</a>
   </div>
@@ -6973,6 +6992,94 @@ async function applySignaturesToAllPages(fileBytes, {
     return dates;
   }
 
+  function ctrgenMinutesToHHMM(totalMin) {
+    const m = ((totalMin % (24 * 60)) + 24 * 60) % (24 * 60);
+    const h = Math.floor(m / 60);
+    const mm = m % 60;
+    return String(h).padStart(2, '0') + String(mm).padStart(2, '0');
+  }
+
+  function ctrgenDateKey(d) {
+    return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0');
+  }
+
+  // Splits one continuous shift (optionally with a lunch break) into
+  // pieces that each fall within a single calendar day, relative to the
+  // date the shift starts. Needed because a shift that crosses midnight
+  // (e.g. 1700-0800) has hours that really happened the NEXT calendar
+  // date, not the date the shift started -- without this, a night-shift
+  // worker's morning hours would get attributed to the wrong day.
+  // Returns [{ dayOffset, on, off }, ...], dayOffset 0 = the start date,
+  // 1 = the day after, etc. Handles a lunch break landing anywhere,
+  // including one that itself straddles midnight.
+  function ctrgenSplitShiftAtMidnight(on1, off1, on2, off2) {
+    const m0 = ctrgenHHMMToMinutes(on1);
+    let lastElapsed = 0;
+    const elapsedOf = (hhmm) => {
+      let e = ctrgenHHMMToMinutes(hhmm) - m0;
+      while (e <= lastElapsed) e += 24 * 60;
+      lastElapsed = e;
+      return e;
+    };
+    const segments = [];
+    if (off1 && on2 && off2) {
+      segments.push([0, elapsedOf(off1)]);
+      segments.push([elapsedOf(on2), elapsedOf(off2)]);
+    } else {
+      segments.push([0, elapsedOf(off2 || off1)]);
+    }
+    const pieces = [];
+    for (const [segStart, segEnd] of segments) {
+      let cur = segStart;
+      while (cur < segEnd) {
+        const absCur = m0 + cur;
+        const dayOffset = Math.floor(absCur / (24 * 60));
+        const nextMidnightAbs = (dayOffset + 1) * (24 * 60);
+        const pieceEndAbs = Math.min(m0 + segEnd, nextMidnightAbs);
+        pieces.push({ dayOffset, on: ctrgenMinutesToHHMM(absCur), off: ctrgenMinutesToHHMM(pieceEndAbs) });
+        cur = pieceEndAbs - m0;
+      }
+    }
+    return pieces;
+  }
+
+  // Builds the actual set of PDF day-rows for an assignment, given one
+  // shift starting each calendar date from firstDay through lastDay. Each
+  // night's shift is split at midnight and the resulting pieces are
+  // grouped back together by the calendar date they actually fall on --
+  // so a run of consecutive night shifts correctly produces one row per
+  // date, each holding that date's own before/after blocks (the tail end
+  // of the previous night's shift, then that night's own shift up to its
+  // next midnight crossing), rather than every date repeating the same
+  // start/stop time regardless of which day the hours actually landed on.
+  // For a normal same-day shift this produces identical output to before
+  // (one row per date, its own before/after-lunch split) since nothing
+  // crosses a midnight boundary.
+  function ctrgenBuildDayRows(firstDay, lastDay, on1, off1, on2, off2) {
+    const shiftStartDates = ctrgenDateRangeInclusive(firstDay, lastDay);
+    const byDate = new Map();
+    for (const startDate of shiftStartDates) {
+      const pieces = ctrgenSplitShiftAtMidnight(on1, off1, on2, off2);
+      for (const piece of pieces) {
+        const d = new Date(startDate.getTime() + piece.dayOffset * 86400000);
+        const key = ctrgenDateKey(d);
+        if (!byDate.has(key)) byDate.set(key, { date: d, segs: [] });
+        byDate.get(key).segs.push({ on: piece.on, off: piece.off });
+      }
+    }
+    const rows = Array.from(byDate.values()).sort((a, b) => a.date - b.date);
+    return rows.map(({ date, segs }) => {
+      segs.sort((a, b) => a.on.localeCompare(b.on));
+      return {
+        date,
+        on1: segs[0] ? segs[0].on : null,
+        off1: segs[0] ? segs[0].off : null,
+        on2: segs[1] ? segs[1].on : null,
+        off2: segs[1] ? segs[1].off : null,
+      };
+    });
+  }
+
   // ---- Parse & validate the roster ----
   ctrgenParseBtn.addEventListener('click', async () => {
     console.log('CTR Generator: Preview Roster clicked.');
@@ -7069,16 +7176,27 @@ async function applySignaturesToAllPages(fileBytes, {
         }
 
         let dates = [];
+        let dayRows = [];
         if (lastDay < firstDay) {
           errors.push('Last Work Day is before First Work Day');
         } else {
           dates = ctrgenDateRangeInclusive(firstDay, lastDay);
-          if (dates.length > CTRGEN_MAX_ROWS) {
-            errors.push(`spans ${dates.length} days, over the ${CTRGEN_MAX_ROWS}-day limit \u2014 split into two rows`);
+          // Split each night's shift at midnight and merge pieces back
+          // onto the calendar date they actually happened on -- for a
+          // night shift, this correctly moves the post-midnight hours to
+          // the next date's row instead of leaving them on the date the
+          // shift started. This can produce one more PDF row than the
+          // number of calendar days worked (the last night's morning
+          // carries onto the day after Last Work Day), so the 22-row
+          // limit is checked against the actual row count, not the
+          // number of days.
+          dayRows = ctrgenBuildDayRows(firstDay, lastDay, on1, off1, on2, off2);
+          if (dayRows.length > CTRGEN_MAX_ROWS) {
+            errors.push(`spans ${dayRows.length} CTR rows (once night-shift hours are split across dates), over the ${CTRGEN_MAX_ROWS}-row limit \u2014 split into two rows`);
           }
         }
         roster.push({
-          rowNum, name, roNumber, classification, email, firstDay, lastDay, on1, off1, on2, off2, dates,
+          rowNum, name, roNumber, classification, email, firstDay, lastDay, on1, off1, on2, off2, dates, dayRows,
           error: errors.length ? errors.join('; ') : null,
           over16,
         });
@@ -7152,7 +7270,7 @@ async function applySignaturesToAllPages(fileBytes, {
         <td style="padding:6px 8px; border-bottom:1px solid var(--line,#eee);">${(r.roNumber || '').replace(/</g, '&lt;')}</td>
         <td style="padding:6px 8px; border-bottom:1px solid var(--line,#eee);">${(r.classification || '').replace(/</g, '&lt;')}</td>
         <td style="padding:6px 8px; border-bottom:1px solid var(--line,#eee);">${dateRange}</td>
-        <td style="padding:6px 8px; border-bottom:1px solid var(--line,#eee);">${r.dates.length || '\u2014'}</td>
+        <td style="padding:6px 8px; border-bottom:1px solid var(--line,#eee);">${(r.dayRows && r.dayRows.length) || '\u2014'}</td>
         <td style="padding:6px 8px; border-bottom:1px solid var(--line,#eee);">${(r.email || '').replace(/</g, '&lt;')}</td>
         <td style="padding:6px 8px; border-bottom:1px solid var(--line,#eee);">${statusHtml}</td>
       `;
@@ -7204,7 +7322,7 @@ async function applySignaturesToAllPages(fileBytes, {
     const pdfDoc = await ctrgenWithTimeout(PDFDocument.load(ctrgenTemplateBytes), 20000, `loading the template PDF for ${row.name}`);
     console.log(`CTR Generator: [${row.name}] template loaded, getting form\u2026`);
     const form = pdfDoc.getForm();
-    console.log(`CTR Generator: [${row.name}] filling ${row.dates.length} day row(s)\u2026`);
+    console.log(`CTR Generator: [${row.name}] filling ${row.dayRows.length} day row(s)\u2026`);
     const setIfExists = (name, value) => {
       try { form.getTextField(name).setText(value || ''); } catch (e) { /* field not present, ignore */ }
     };
@@ -7213,14 +7331,16 @@ async function applySignaturesToAllPages(fileBytes, {
     setIfExists('office_responsible', office);
     setIfExists('fire_name', fireName);
     setIfExists('fire_number', fireNumber);
-    row.dates.forEach((d, i) => {
+    row.dayRows.forEach((dr, i) => {
       const n = i + 1;
-      setIfExists(`classification_row${n}`, row.classification);
-      setIfExists(`date_row${n}`, ctrgenFmtDateMMDD(d));
-      setIfExists(`on1_row${n}`, row.on1);
-      setIfExists(`off1_row${n}`, row.off1);
-      setIfExists(`on2_row${n}`, row.on2);
-      setIfExists(`off2_row${n}`, row.off2);
+      // Classification only goes on the first line of the CTR, not
+      // repeated on every day row.
+      if (n === 1) setIfExists(`classification_row${n}`, row.classification);
+      setIfExists(`date_row${n}`, ctrgenFmtDateMMDD(dr.date));
+      setIfExists(`on1_row${n}`, dr.on1);
+      setIfExists(`off1_row${n}`, dr.off1);
+      setIfExists(`on2_row${n}`, dr.on2);
+      setIfExists(`off2_row${n}`, dr.off2);
     });
     console.log(`CTR Generator: [${row.name}] fields filled, saving PDF\u2026`);
     // The template ships with NeedAppearances=true so Acrobat/Preview show
@@ -7244,6 +7364,8 @@ async function applySignaturesToAllPages(fileBytes, {
   const ctrindName = document.getElementById('ctrindName');
   const ctrindRoNumber = document.getElementById('ctrindRoNumber');
   const ctrindClassification = document.getElementById('ctrindClassification');
+  const ctrindAdLetterWrap = document.getElementById('ctrindAdLetterWrap');
+  const ctrindAdLetter = document.getElementById('ctrindAdLetter');
   const ctrindFirstDay = document.getElementById('ctrindFirstDay');
   const ctrindLastDay = document.getElementById('ctrindLastDay');
   const ctrindShiftStart = document.getElementById('ctrindShiftStart');
@@ -7287,7 +7409,7 @@ async function applySignaturesToAllPages(fileBytes, {
     try {
       const name = ctrindName.value.trim();
       const roNumber = ctrindRoNumber.value.trim();
-      const classification = ctrindClassification.value.trim();
+      const baseClassification = ctrindClassification.value.trim();
       const office = ctrindOffice.value.trim();
       const fireName = ctrindFireName.value.trim();
       const fireNumber = ctrindFireNumber.value.trim();
@@ -7300,7 +7422,8 @@ async function applySignaturesToAllPages(fileBytes, {
       const errors = [];
       if (!name) errors.push('Employee Name is required');
       if (!roNumber) errors.push('Resource Order Number is required');
-      if (!classification) errors.push('Classification is required');
+      if (!baseClassification) errors.push('Classification is required');
+      if (baseClassification === 'AD' && !ctrindAdLetter.value.trim()) errors.push('AD Pay Plan Letter is required when Classification is AD');
       if (!firstDay) errors.push('First Work Day is required');
       if (!lastDay) errors.push('Last Work Day is required');
       if (!on1) errors.push('Shift Start is required, 24-hour HHMM (e.g. 0600)');
@@ -7309,13 +7432,9 @@ async function applySignaturesToAllPages(fileBytes, {
         ctrindShowStatus('error', errors.join('; ') + '.');
         return;
       }
+      const classification = baseClassification === 'AD' ? `AD-${ctrindAdLetter.value.trim()}` : baseClassification;
       if (lastDay < firstDay) {
         ctrindShowStatus('error', 'Last Work Day is before First Work Day.');
-        return;
-      }
-      const dates = ctrgenDateRangeInclusive(firstDay, lastDay);
-      if (dates.length > CTRGEN_MAX_ROWS) {
-        ctrindShowStatus('error', `That spans ${dates.length} days, over the ${CTRGEN_MAX_ROWS}-day limit per form \u2014 split it into two CTRs.`);
         return;
       }
 
@@ -7344,7 +7463,20 @@ async function applySignaturesToAllPages(fileBytes, {
         return;
       }
 
-      const row = { name, roNumber, classification, firstDay, lastDay, dates, on1, off1, on2, off2 };
+      // Split each night's shift at midnight and merge pieces back onto
+      // the calendar date they actually happened on, so a night shift's
+      // post-midnight hours land on the correct (next) date's row instead
+      // of staying on the date the shift started. Can produce one more
+      // row than the number of days worked (the last night's morning
+      // carries onto the day after Last Work Day), so the 22-row limit is
+      // checked against the actual row count.
+      const dayRows = ctrgenBuildDayRows(firstDay, lastDay, on1, off1, on2, off2);
+      if (dayRows.length > CTRGEN_MAX_ROWS) {
+        ctrindShowStatus('error', `That spans ${dayRows.length} CTR rows (once night-shift hours are split across dates), over the ${CTRGEN_MAX_ROWS}-row limit per form \u2014 split it into two CTRs.`);
+        return;
+      }
+
+      const row = { name, roNumber, classification, firstDay, lastDay, dayRows, on1, off1, on2, off2 };
       ctrindShowStatus('', 'Building your CTR\u2026');
       const output = await ctrgenFillOne(row, { office, fireName, fireNumber });
       ctrindCurrentOutput = output;
@@ -7355,7 +7487,7 @@ async function applySignaturesToAllPages(fileBytes, {
       ctrindPdfFrame.style.display = '';
       ctrindDownloadBtn.style.display = '';
       ctrindResultsPanel.classList.add('show');
-      ctrindShowStatus('success', `CTR built for ${dates.length} day(s), ${(workedMinutes / 60).toFixed(1)}-hour shift each day. Preview on the right, or click Download.`);
+      ctrindShowStatus('success', `CTR built: ${dayRows.length} row(s) on the form, ${(workedMinutes / 60).toFixed(1)}-hour shift each night. Preview on the right, or click Download.`);
     } catch (err) {
       console.error('Individual CTR error:', err);
       ctrindShowStatus('error', 'Error building the CTR: ' + errMsg(err));
@@ -7377,6 +7509,12 @@ async function applySignaturesToAllPages(fileBytes, {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
 
+  ctrindClassification.addEventListener('change', () => {
+    const isAD = ctrindClassification.value === 'AD';
+    ctrindAdLetterWrap.style.display = isAD ? '' : 'none';
+    if (!isAD) ctrindAdLetter.value = '';
+  });
+
   ctrindClearBtn.addEventListener('click', () => {
     ctrindOffice.value = '';
     ctrindFireName.value = '';
@@ -7384,6 +7522,8 @@ async function applySignaturesToAllPages(fileBytes, {
     ctrindName.value = '';
     ctrindRoNumber.value = '';
     ctrindClassification.value = '';
+    ctrindAdLetter.value = '';
+    ctrindAdLetterWrap.style.display = 'none';
     ctrindFirstDay.value = '';
     ctrindLastDay.value = '';
     ctrindShiftStart.value = '';
