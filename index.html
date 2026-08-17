@@ -992,8 +992,12 @@
       <button id="folCreateBtn" class="secondary" type="button" disabled>Choose Folder &amp; Create Subfolders</button>
       <button id="folDownloadBtn" class="secondary" type="button" disabled>Download Folder List (.txt)</button>
       <button id="folContractXlsxBtn" class="secondary" type="button" disabled>Download New Contracts (.xlsx)</button>
+      <button id="folCtrRosterBtn" class="secondary" type="button" disabled>Download CTR Roster for Team (.xlsx)</button>
       <div style="font-size:12px; color:var(--muted,#666); margin-top:4px;">
         Lists the RO Number and Contract Number for every new folder (not already found in the existing-folders list) among equipment, contract crews, and contract overhead. VIPR rows get their real contract number; EERA rows get "Check AIMS Tracker" instead, since they don't have one. IROC doesn't export a CLIN number, so that column is left blank &mdash; fill it in as you process each contract in the Agreement Processor tab.
+      </div>
+      <div style="font-size:12px; color:var(--muted,#666); margin-top:4px;">
+        If this XML export includes an Incident Management Team, "Download CTR Roster for Team" builds a CIMT CTR Generator roster template with every team member's name and Resource Order Number already filled in &mdash; just add classification, email, dates, and shift times, then upload it in the CIMT CTR Generator tab. Only applies to the IMT itself, not other resources on the incident.
       </div>
       <button id="folClearBtn" class="secondary" type="button">Clear</button>
       <div class="status" id="folStatus"></div>
@@ -1082,7 +1086,7 @@
   </div>
 
   <p class="beta-note">&#9888;&#65039; OCR (used for reading scanned Agreements, Resource Orders, and OF-286s) is currently in beta testing and can be unreliable, especially on handwriting and low-quality scans. Freshly downloaded, unscanned documents straight from VIPR, IROC, and e-iSuite are still preferred whenever you have them &mdash; use OCR results as a starting point to verify, not a final answer.</p>
-  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.23</p>
+  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.25</p>
   <div class="suggestion-wrap">
     <a class="suggestion-link" href="https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=urWTBhhLe02TQfMvQApUlLMtrc2YmxRJib_E55WLqt5UOTdBTFhSV09MVDVFOFpJODJISDlHUEhSMy4u" target="_blank" rel="noopener">Submit a Suggestion</a>
   </div>
@@ -3004,6 +3008,29 @@ async function runAudit(agreementFile, of286File, roFile, shiftFiles, statusCb) 
       }
     }
 
+    if (dailyRate) {
+      // Explicit, standalone check: does the per-day rate the OF-286
+      // actually billed match the agreement's daily rate? This is
+      // deliberately separate from the rate-x-days-vs-total check below --
+      // that one can pass or fail for reasons that have nothing to do with
+      // the rate itself (wrong day count, a missed half-day, a transport
+      // rounding difference), so folding them together can hide a genuine
+      // wrong-rate problem behind an otherwise-balancing total, or flag a
+      // rate that's actually fine just because the total didn't reconcile.
+      const of286DailyRate = extractDailyRateFromOF286(of286PageTexts.join('\n'));
+      const clinLabelForRate = roClinFields ? roResult.clin : matchedClin.clinNumber;
+      if (of286DailyRate !== null) {
+        const rateDiff = Math.abs(of286DailyRate - dailyRate);
+        const rateOk = rateDiff < 0.01;
+        addCheck('Daily Rate Match (Agreement vs OF-286 billed rate)', rateOk ? 'pass' : 'fail',
+          `Agreement daily rate (CLIN ${clinLabelForRate}): $${dailyRate.toFixed(2)}/day  |  OF-286 billed rate: $${of286DailyRate.toFixed(2)}/day` +
+          (rateOk ? '' : `  (difference: $${rateDiff.toFixed(2)}/day -- verify this isn't a half-day rate on the first/last day, which is expected and billed separately)`));
+      } else {
+        addCheck('Daily Rate Match (Agreement vs OF-286 billed rate)', 'warn',
+          `Agreement daily rate (CLIN ${clinLabelForRate}): $${dailyRate.toFixed(2)}/day  |  Could not find a DAILY rate line on the OF-286 to compare against -- please verify manually.`);
+      }
+    }
+
     if (dailyRate && dailyRows.length) {
       // Use the actual count of billed DAILY rows (already parsed
       // document-wide, so this naturally spans every invoice in a bundled
@@ -3051,11 +3078,10 @@ async function runAudit(agreementFile, of286File, roFile, shiftFiles, statusCb) 
         ok = true;
         halfDayNote = `  (difference matches the expected half-day reduction -- not flagged)`;
       }
-      const of286DailyRate = extractDailyRateFromOF286(of286PageTexts.join('\n'));
-      const rateNote = (!ok && of286DailyRate && Math.abs(of286DailyRate - dailyRate) > 0.01)
-        ? `  |  OF-286 daily rate: $${of286DailyRate.toFixed(2)}` : '';
+      // (The per-day rate itself is checked separately above, as its own
+      // "Daily Rate Match" check -- no need to repeat it here.)
       addCheck('Daily Rate Consistency (Agreement rate x days vs OF-286 total)', ok ? 'pass' : 'fail',
-        `Agreement daily rate (CLIN ${roClinFields ? roResult.clin : matchedClin.clinNumber}): $${dailyRate.toFixed(2)} x ${days} day(s) = $${(dailyRate * days).toFixed(2)}` + transportNote + `  |  Expected total: $${expectedTotal.toFixed(2)}  |  ${totalLabel}: $${actualTotal.toFixed(2)}` + (ok ? '' : `  (difference: $${diff.toFixed(2)})`) + halfDayNote + rateNote);
+        `Agreement daily rate (CLIN ${roClinFields ? roResult.clin : matchedClin.clinNumber}): $${dailyRate.toFixed(2)} x ${days} day(s) = $${(dailyRate * days).toFixed(2)}` + transportNote + `  |  Expected total: $${expectedTotal.toFixed(2)}  |  ${totalLabel}: $${actualTotal.toFixed(2)}` + (ok ? '' : `  (difference: $${diff.toFixed(2)})`) + halfDayNote);
     }
   }
 
@@ -5501,6 +5527,72 @@ async function applySignaturesToAllPages(fileBytes, {
 
     return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   }
+
+  // Shared copy of the blank CTR roster template (same bytes as the one
+  // used by the CIMT CTR Generator tab) so the Folder Namer can also build
+  // a pre-filled roster for IMT team members extracted from the XML --
+  // duplicated here because functions/constants declared inside one tab's
+  // IIFE aren't visible to another tab's IIFE.
+  const CTRGEN_ROSTER_TEMPLATE_B64_SHARED =
+    "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";
+
+  function folBase64ToBytes(b64) {
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  // Builds a roster .xlsx pre-filled with Team Member Name + Resource Order
+  // Number for each given member (other columns left blank for the person
+  // to fill in), reusing the exact Table/date-column/dropdown structure of
+  // the blank template -- by patching real values into its worksheet XML
+  // rather than re-building the table/validation/date-format machinery by
+  // hand (safer, since that machinery was built once with a real
+  // spreadsheet library and verified, rather than hand-written here).
+  async function folBuildPrefilledCtrRosterBlob(members) {
+    const zip = await JSZip.loadAsync(folBase64ToBytes(CTRGEN_ROSTER_TEMPLATE_B64_SHARED));
+    const sheetPath = 'xl/worksheets/sheet1.xml';
+    let xml = await zip.file(sheetPath).async('string');
+    const capped = members.slice(0, 99); // template has pre-built date-styled rows 2-100
+    capped.forEach((m, i) => {
+      const rowNum = i + 2;
+      const name = folXmlEscape(m.name || '');
+      const ro = folXmlEscape(m.roNumber || '');
+      const nameCell = `<c r="A${rowNum}" t="inlineStr"><is><t xml:space="preserve">${name}</t></is></c>`;
+      const roCell = `<c r="B${rowNum}" t="inlineStr"><is><t xml:space="preserve">${ro}</t></is></c>`;
+      const rowRegex = new RegExp(`<row r="${rowNum}">([\\s\\S]*?)</row>`);
+      const rowMatch = xml.match(rowRegex);
+      if (rowMatch) {
+        // Existing row (2 = example row with full data in every column;
+        // 3-100 = pre-styled empty date cells only in E/F). Strip any
+        // existing A/B cells, and -- since only row 2 has leftover example
+        // values in C/D/G/H/I plus real date values in E/F -- clear those
+        // too, so nobody mistakes the old example's classification, email,
+        // dates, or times for real prefilled data. E/F keep their date
+        // style (s="1") so the cell is still a proper date cell once
+        // someone types a date into it, matching every other row.
+        let rest = rowMatch[1]
+          .replace(/<c r="A\d+"[^>]*>[\s\S]*?<\/c>/, '')
+          .replace(/<c r="B\d+"[^>]*>[\s\S]*?<\/c>/, '')
+          .replace(/<c r="C\d+"[^>]*>[\s\S]*?<\/c>/, '')
+          .replace(/<c r="D\d+"[^>]*>[\s\S]*?<\/c>/, '')
+          .replace(/<c r="G\d+"[^>]*>[\s\S]*?<\/c>/, '')
+          .replace(/<c r="H\d+"[^>]*>[\s\S]*?<\/c>/, '')
+          .replace(/<c r="I\d+"[^>]*>[\s\S]*?<\/c>/, '')
+          .replace(/(<c r="E\d+"[^>]*)(>[\s\S]*?<\/c>|\/>)/, '$1></c>')
+          .replace(/(<c r="F\d+"[^>]*)(>[\s\S]*?<\/c>|\/>)/, '$1></c>');
+        xml = xml.replace(rowMatch[0], `<row r="${rowNum}">${nameCell}${roCell}${rest}</row>`);
+      } else {
+        // Shouldn't happen within the template's pre-built row range, but
+        // fall back to inserting a fresh row just in case.
+        xml = xml.replace('</sheetData>', `<row r="${rowNum}">${nameCell}${roCell}</row></sheetData>`);
+      }
+    });
+    zip.file(sheetPath, xml);
+    return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  }
+
 </script>
 <script>
 (() => {
@@ -5516,6 +5608,8 @@ async function applySignaturesToAllPages(fileBytes, {
   const folCreateBtn = document.getElementById('folCreateBtn');
   const folDownloadBtn = document.getElementById('folDownloadBtn');
   const folContractXlsxBtn = document.getElementById('folContractXlsxBtn');
+  const folCtrRosterBtn = document.getElementById('folCtrRosterBtn');
+  let folImtRosterMembers = [];
   const folExcludedVendorsInput = document.getElementById('folExcludedVendors');
   const folClearBtn = document.getElementById('folClearBtn');
   const folStatus = document.getElementById('folStatus');
@@ -5697,6 +5791,8 @@ async function applySignaturesToAllPages(fileBytes, {
     folCreateBtn.disabled = true;
     folDownloadBtn.disabled = true;
     folContractXlsxBtn.disabled = true;
+    folCtrRosterBtn.disabled = true;
+    folImtRosterMembers = [];
     folFolderNames = [];
     folNewContractRows = [];
     folTable.style.display = 'none';
@@ -5715,6 +5811,8 @@ async function applySignaturesToAllPages(fileBytes, {
     folCreateBtn.disabled = true;
     folDownloadBtn.disabled = true;
     folContractXlsxBtn.disabled = true;
+    folCtrRosterBtn.disabled = true;
+    folImtRosterMembers = [];
     folFolderNames = [];
     folNewContractRows = [];
     folTable.style.display = 'none';
@@ -6065,6 +6163,23 @@ async function applySignaturesToAllPages(fileBytes, {
         }
       }
 
+      // Capture IMT team members (name + Resource Order Number only) for
+      // the optional CTR roster export -- deliberately scoped to just the
+      // IMT itself, not equipment/crews/other overhead on the incident.
+      folImtRosterMembers = [];
+      for (const imtRow of overheadImtRows) {
+        const childPrefix = imtRow.ReqNumber + '.';
+        const children = rows.filter((r) => r.ReqCatalogName === 'Overhead' && r.ReqCategoryName === 'Positions' && r.ReqNumber.startsWith(childPrefix) && !excludeRow(r));
+        for (const child of children) {
+          const last = (child.LastName || '').trim();
+          const first = (child.FirstName || '').trim();
+          const name = last && first ? `${last}, ${first}` : (last || first || '');
+          if (!name || !child.ReqNumber) continue;
+          folImtRosterMembers.push({ name, roNumber: child.ReqNumber });
+        }
+      }
+      folCtrRosterBtn.disabled = folImtRosterMembers.length === 0;
+
       folTableBody.innerHTML = '';
       const seen = new Map();
       folFolderNames = [];
@@ -6228,6 +6343,29 @@ async function applySignaturesToAllPages(fileBytes, {
       folShowStatus('error', 'Error building the spreadsheet: ' + errMsg(err));
     } finally {
       folContractXlsxBtn.disabled = folNewContractRows.length === 0;
+    }
+  });
+
+  folCtrRosterBtn.addEventListener('click', async () => {
+    if (!folImtRosterMembers.length) return;
+    folCtrRosterBtn.disabled = true;
+    try {
+      const blob = await folBuildPrefilledCtrRosterBlob(folImtRosterMembers);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'CIMT_CTR_Roster_Template.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const overflow = folImtRosterMembers.length - 99;
+      folShowStatus('success', `Roster built for ${Math.min(folImtRosterMembers.length, 99)} team member(s), name and Resource Order Number pre-filled. Add classification, email, dates, and shift times, then upload it in the CIMT CTR Generator tab.` + (overflow > 0 ? ` Note: ${overflow} member(s) beyond the first 99 were not included -- split into a second roster if needed.` : ''));
+    } catch (err) {
+      console.error('CTR roster build error:', err);
+      folShowStatus('error', 'Error building the CTR roster: ' + errMsg(err));
+    } finally {
+      folCtrRosterBtn.disabled = folImtRosterMembers.length === 0;
     }
   });
 
