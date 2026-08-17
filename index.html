@@ -266,6 +266,10 @@
     flex: 2 1 520px;
     min-width: 420px;
   }
+  #ctrgenResultsPanel {
+    flex: 2 1 640px;
+    min-width: 480px;
+  }
   .fields-panel .row.stacked {
     flex-direction: column;
     align-items: flex-start;
@@ -1090,7 +1094,7 @@
   </div>
 
   <p class="beta-note">&#9888;&#65039; OCR (used for reading scanned Agreements, Resource Orders, and OF-286s) is currently in beta testing and can be unreliable, especially on handwriting and low-quality scans. Freshly downloaded, unscanned documents straight from VIPR, IROC, and e-iSuite are still preferred whenever you have them &mdash; use OCR results as a starting point to verify, not a final answer.</p>
-  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.30</p>
+  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.31</p>
   <div class="suggestion-wrap">
     <a class="suggestion-link" href="https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=urWTBhhLe02TQfMvQApUlLMtrc2YmxRJib_E55WLqt5UOTdBTFhSV09MVDVFOFpJODJISDlHUEhSMy4u" target="_blank" rel="noopener">Submit a Suggestion</a>
   </div>
@@ -6981,6 +6985,7 @@ async function applySignaturesToAllPages(fileBytes, {
 
         // Total time on shift, lunch (if any) excluded -- shifts that
         // cross midnight wrap around rather than going negative.
+        let over16 = false;
         const startMin = ctrgenHHMMToMinutes(on1);
         const stopMin = ctrgenHHMMToMinutes(shiftStop);
         if (startMin !== null && stopMin !== null) {
@@ -6988,6 +6993,7 @@ async function applySignaturesToAllPages(fileBytes, {
           if (span <= 0) span += 24 * 60;
           const workedMinutes = span - (lunchStart ? CTRGEN_LUNCH_MINUTES : 0);
           if (workedMinutes > 16 * 60) {
+            over16 = true;
             errors.push(`shift totals ${(workedMinutes / 60).toFixed(1)} hours, over the 16-hour daily limit \u2014 double-check the shift start/stop and lunch time`);
           }
         }
@@ -7002,9 +7008,9 @@ async function applySignaturesToAllPages(fileBytes, {
           }
         }
         roster.push({
-
           rowNum, name, roNumber, classification, email, firstDay, lastDay, on1, off1, on2, off2, dates,
           error: errors.length ? errors.join('; ') : null,
+          over16,
         });
       }
 
@@ -7068,6 +7074,9 @@ async function applySignaturesToAllPages(fileBytes, {
       const statusHtml = r.error
         ? `<span style="color:#b00020;">${r.error}</span>`
         : '<span style="color:#0a7a2a;">OK</span>';
+      if (r.over16) {
+        tr.style.backgroundColor = '#fdecea';
+      }
       tr.innerHTML = `
         <td style="padding:6px 8px; border-bottom:1px solid var(--line,#eee);">${(r.name || '').replace(/</g, '&lt;')}</td>
         <td style="padding:6px 8px; border-bottom:1px solid var(--line,#eee);">${(r.roNumber || '').replace(/</g, '&lt;')}</td>
