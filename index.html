@@ -992,12 +992,16 @@
       <button id="folCreateBtn" class="secondary" type="button" disabled>Choose Folder &amp; Create Subfolders</button>
       <button id="folDownloadBtn" class="secondary" type="button" disabled>Download Folder List (.txt)</button>
       <button id="folContractXlsxBtn" class="secondary" type="button" disabled>Download New Contracts (.xlsx)</button>
+      <div class="field" id="folImtTeamSelectWrap" style="display:none; margin-top:10px;">
+        <label>Team (if multiple IMTs are in this XML)</label>
+        <select id="folImtTeamSelect" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--line, #ccc);"></select>
+      </div>
       <button id="folCtrRosterBtn" class="secondary" type="button" disabled>Download CTR Roster for Team (.xlsx)</button>
       <div style="font-size:12px; color:var(--muted,#666); margin-top:4px;">
         Lists the RO Number and Contract Number for every new folder (not already found in the existing-folders list) among equipment, contract crews, and contract overhead. VIPR rows get their real contract number; EERA rows get "Check AIMS Tracker" instead, since they don't have one. IROC doesn't export a CLIN number, so that column is left blank &mdash; fill it in as you process each contract in the Agreement Processor tab.
       </div>
       <div style="font-size:12px; color:var(--muted,#666); margin-top:4px;">
-        If this XML export includes an Incident Management Team, "Download CTR Roster for Team" builds a CIMT CTR Generator roster template with every team member's name and Resource Order Number already filled in &mdash; just add classification, email, dates, and shift times, then upload it in the CIMT CTR Generator tab. Only applies to the IMT itself, not other resources on the incident.
+        If this XML export includes an Incident Management Team, "Download CTR Roster for Team" builds a CIMT CTR Generator roster template with every team member's name, Resource Order Number, and (where the appointment type is recognized) classification already filled in &mdash; just add email, dates, and shift times, and double-check any classification left blank, then upload it in the CIMT CTR Generator tab. Only applies to the IMT itself, not other resources on the incident. If the export has more than one IMT, choose which one above before downloading.
       </div>
       <button id="folClearBtn" class="secondary" type="button">Clear</button>
       <div class="status" id="folStatus"></div>
@@ -1086,7 +1090,7 @@
   </div>
 
   <p class="beta-note">&#9888;&#65039; OCR (used for reading scanned Agreements, Resource Orders, and OF-286s) is currently in beta testing and can be unreliable, especially on handwriting and low-quality scans. Freshly downloaded, unscanned documents straight from VIPR, IROC, and e-iSuite are still preferred whenever you have them &mdash; use OCR results as a starting point to verify, not a final answer.</p>
-  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.25</p>
+  <p class="footnote">All processing happens in your browser &mdash; no document or image data is ever sent to any server, including for the OCR fallback used on scanned OF-286s.<br>Created by Northern Rockies Team 6 PROC Nerds<br>Version 6.27</p>
   <div class="suggestion-wrap">
     <a class="suggestion-link" href="https://forms.cloud.microsoft/Pages/ResponsePage.aspx?id=urWTBhhLe02TQfMvQApUlLMtrc2YmxRJib_E55WLqt5UOTdBTFhSV09MVDVFOFpJODJISDlHUEhSMy4u" target="_blank" rel="noopener">Submit a Suggestion</a>
   </div>
@@ -5559,19 +5563,28 @@ async function applySignaturesToAllPages(fileBytes, {
       const rowNum = i + 2;
       const name = folXmlEscape(m.name || '');
       const ro = folXmlEscape(m.roNumber || '');
+      const cls = (m.classification || '').trim();
       const nameCell = `<c r="A${rowNum}" t="inlineStr"><is><t xml:space="preserve">${name}</t></is></c>`;
       const roCell = `<c r="B${rowNum}" t="inlineStr"><is><t xml:space="preserve">${ro}</t></is></c>`;
+      // Only write a Classification cell when the value is one of the
+      // dropdown's actual choices -- otherwise leave the cell blank so the
+      // dropdown still works normally and nobody has to fight a stray
+      // value that doesn't match FED / AD / EFF/COOP.
+      const classCell = (cls === 'FED' || cls === 'AD' || cls === 'EFF/COOP')
+        ? `<c r="C${rowNum}" t="inlineStr"><is><t xml:space="preserve">${folXmlEscape(cls)}</t></is></c>`
+        : '';
       const rowRegex = new RegExp(`<row r="${rowNum}">([\\s\\S]*?)</row>`);
       const rowMatch = xml.match(rowRegex);
       if (rowMatch) {
         // Existing row (2 = example row with full data in every column;
         // 3-100 = pre-styled empty date cells only in E/F). Strip any
-        // existing A/B cells, and -- since only row 2 has leftover example
-        // values in C/D/G/H/I plus real date values in E/F -- clear those
-        // too, so nobody mistakes the old example's classification, email,
-        // dates, or times for real prefilled data. E/F keep their date
-        // style (s="1") so the cell is still a proper date cell once
-        // someone types a date into it, matching every other row.
+        // existing A/B/C cells, and -- since only row 2 has leftover
+        // example values in C/D/G/H/I plus real date values in E/F --
+        // clear those too, so nobody mistakes the old example's
+        // classification, email, dates, or times for real prefilled data.
+        // E/F keep their date style (s="1") so the cell is still a proper
+        // date cell once someone types a date into it, matching every
+        // other row.
         let rest = rowMatch[1]
           .replace(/<c r="A\d+"[^>]*>[\s\S]*?<\/c>/, '')
           .replace(/<c r="B\d+"[^>]*>[\s\S]*?<\/c>/, '')
@@ -5582,11 +5595,11 @@ async function applySignaturesToAllPages(fileBytes, {
           .replace(/<c r="I\d+"[^>]*>[\s\S]*?<\/c>/, '')
           .replace(/(<c r="E\d+"[^>]*)(>[\s\S]*?<\/c>|\/>)/, '$1></c>')
           .replace(/(<c r="F\d+"[^>]*)(>[\s\S]*?<\/c>|\/>)/, '$1></c>');
-        xml = xml.replace(rowMatch[0], `<row r="${rowNum}">${nameCell}${roCell}${rest}</row>`);
+        xml = xml.replace(rowMatch[0], `<row r="${rowNum}">${nameCell}${roCell}${classCell}${rest}</row>`);
       } else {
         // Shouldn't happen within the template's pre-built row range, but
         // fall back to inserting a fresh row just in case.
-        xml = xml.replace('</sheetData>', `<row r="${rowNum}">${nameCell}${roCell}</row></sheetData>`);
+        xml = xml.replace('</sheetData>', `<row r="${rowNum}">${nameCell}${roCell}${classCell}</row></sheetData>`);
       }
     });
     zip.file(sheetPath, xml);
@@ -5609,7 +5622,9 @@ async function applySignaturesToAllPages(fileBytes, {
   const folDownloadBtn = document.getElementById('folDownloadBtn');
   const folContractXlsxBtn = document.getElementById('folContractXlsxBtn');
   const folCtrRosterBtn = document.getElementById('folCtrRosterBtn');
-  let folImtRosterMembers = [];
+  const folImtTeamSelectWrap = document.getElementById('folImtTeamSelectWrap');
+  const folImtTeamSelect = document.getElementById('folImtTeamSelect');
+  let folImtTeams = []; // [{ label, members }] -- one entry per IMT found in the XML
   const folExcludedVendorsInput = document.getElementById('folExcludedVendors');
   const folClearBtn = document.getElementById('folClearBtn');
   const folStatus = document.getElementById('folStatus');
@@ -5792,7 +5807,9 @@ async function applySignaturesToAllPages(fileBytes, {
     folDownloadBtn.disabled = true;
     folContractXlsxBtn.disabled = true;
     folCtrRosterBtn.disabled = true;
-    folImtRosterMembers = [];
+    folImtTeams = [];
+    folImtTeamSelect.innerHTML = '';
+    folImtTeamSelectWrap.style.display = 'none';
     folFolderNames = [];
     folNewContractRows = [];
     folTable.style.display = 'none';
@@ -5812,7 +5829,9 @@ async function applySignaturesToAllPages(fileBytes, {
     folDownloadBtn.disabled = true;
     folContractXlsxBtn.disabled = true;
     folCtrRosterBtn.disabled = true;
-    folImtRosterMembers = [];
+    folImtTeams = [];
+    folImtTeamSelect.innerHTML = '';
+    folImtTeamSelectWrap.style.display = 'none';
     folFolderNames = [];
     folNewContractRows = [];
     folTable.style.display = 'none';
@@ -5867,6 +5886,26 @@ async function applySignaturesToAllPages(fileBytes, {
     const match = /^([A-Za-z]+)-(.+)$/.exec(reqNumber || '');
     if (!match) return null;
     return { prefix: match[1], number: match[2] };
+  }
+
+  // Maps an IROC row's employment info to one of the three CTR roster
+  // Classification dropdown values (FED, AD, EFF/COOP). Checks both
+  // EmploymentClass and ResProvAgencyAbbrev, since some exports use an
+  // agency-specific code (e.g. "FSAD" for a Forest Service AD hire,
+  // "DOIAD" for a DOI AD hire) instead of a generic "Casual Hire" -- both
+  // of those, like "Casual Hire" itself, are Administratively Determined
+  // appointments and map to AD. Recognized federal appointment types
+  // (Career, Career Seasonal, Temporary, Intermittent/Call When Needed)
+  // map to FED. Anything not clearly recognized is left blank rather than
+  // guessed, since this affects pay rate and shouldn't be silently wrong.
+  function folClassificationForRow(row) {
+    const ec = (row.EmploymentClass || '').trim().toUpperCase();
+    const agency = (row.ResProvAgencyAbbrev || '').trim().toUpperCase();
+    if (ec === 'FSAD' || ec === 'DOIAD' || agency === 'FSAD' || agency === 'DOIAD') return 'AD';
+    if (ec === 'AD' || /CASUAL/.test(ec)) return 'AD';
+    if (/CAREER|PERMANENT|^TEMPORARY$|INTERMITTENT/.test(ec)) return 'FED';
+    if (/VOLUNTEER|COOPERATOR|^COOP$|^EFF$|EFF\/COOP/.test(ec)) return 'EFF/COOP';
+    return '';
   }
 
   function folBuildFolderName(row, mode) {
@@ -6166,19 +6205,33 @@ async function applySignaturesToAllPages(fileBytes, {
       // Capture IMT team members (name + Resource Order Number only) for
       // the optional CTR roster export -- deliberately scoped to just the
       // IMT itself, not equipment/crews/other overhead on the incident.
-      folImtRosterMembers = [];
+      // Grouped per-team (not flattened) so multiple IMTs on one incident
+      // can each get their own roster instead of getting mixed together.
+      folImtTeams = [];
       for (const imtRow of overheadImtRows) {
         const childPrefix = imtRow.ReqNumber + '.';
         const children = rows.filter((r) => r.ReqCatalogName === 'Overhead' && r.ReqCategoryName === 'Positions' && r.ReqNumber.startsWith(childPrefix) && !excludeRow(r));
+        const members = [];
         for (const child of children) {
           const last = (child.LastName || '').trim();
           const first = (child.FirstName || '').trim();
           const name = last && first ? `${last}, ${first}` : (last || first || '');
           if (!name || !child.ReqNumber) continue;
-          folImtRosterMembers.push({ name, roNumber: child.ReqNumber });
+          members.push({ name, roNumber: child.ReqNumber, classification: folClassificationForRow(child) });
         }
+        if (!members.length) continue;
+        const teamName = folExtractTeamName(imtRow) || imtRow.FilledCatalogItemName || 'IMT';
+        folImtTeams.push({ label: `${teamName} (${imtRow.ReqNumber}) \u2014 ${members.length} member(s)`, members });
       }
-      folCtrRosterBtn.disabled = folImtRosterMembers.length === 0;
+      folImtTeamSelect.innerHTML = '';
+      folImtTeams.forEach((team, idx) => {
+        const opt = document.createElement('option');
+        opt.value = String(idx);
+        opt.textContent = team.label;
+        folImtTeamSelect.appendChild(opt);
+      });
+      folImtTeamSelectWrap.style.display = folImtTeams.length ? '' : 'none';
+      folCtrRosterBtn.disabled = folImtTeams.length === 0;
 
       folTableBody.innerHTML = '';
       const seen = new Map();
@@ -6347,25 +6400,34 @@ async function applySignaturesToAllPages(fileBytes, {
   });
 
   folCtrRosterBtn.addEventListener('click', async () => {
-    if (!folImtRosterMembers.length) return;
+    if (!folImtTeams.length) return;
+    const selectedIdx = parseInt(folImtTeamSelect.value, 10);
+    const team = folImtTeams[selectedIdx];
+    if (!team) return;
+    const members = team.members;
     folCtrRosterBtn.disabled = true;
     try {
-      const blob = await folBuildPrefilledCtrRosterBlob(folImtRosterMembers);
+      const blob = await folBuildPrefilledCtrRosterBlob(members);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'CIMT_CTR_Roster_Template.xlsx';
+      // Keep the filename readable but filesystem-safe: strip anything
+      // that isn't alphanumeric, space, dash, underscore, or parens.
+      const safeLabel = team.label.replace(/\s*\u2014.*$/, '').replace(/[^A-Za-z0-9 _\-()]/g, '').trim().replace(/\s+/g, '_');
+      a.download = `CIMT_CTR_Roster_${safeLabel || 'Team'}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      const overflow = folImtRosterMembers.length - 99;
-      folShowStatus('success', `Roster built for ${Math.min(folImtRosterMembers.length, 99)} team member(s), name and Resource Order Number pre-filled. Add classification, email, dates, and shift times, then upload it in the CIMT CTR Generator tab.` + (overflow > 0 ? ` Note: ${overflow} member(s) beyond the first 99 were not included -- split into a second roster if needed.` : ''));
+      const overflow = members.length - 99;
+      const capped = members.slice(0, 99);
+      const classifiedCount = capped.filter((m) => m.classification).length;
+      folShowStatus('success', `Roster built for ${capped.length} team member(s), name and Resource Order Number pre-filled, classification recognized for ${classifiedCount} of them. Fill in the rest (any blank classifications, email, dates, and shift times), then upload it in the CIMT CTR Generator tab.` + (overflow > 0 ? ` Note: ${overflow} member(s) beyond the first 99 were not included -- split into a second roster if needed.` : ''));
     } catch (err) {
       console.error('CTR roster build error:', err);
       folShowStatus('error', 'Error building the CTR roster: ' + errMsg(err));
     } finally {
-      folCtrRosterBtn.disabled = folImtRosterMembers.length === 0;
+      folCtrRosterBtn.disabled = folImtTeams.length === 0;
     }
   });
 
